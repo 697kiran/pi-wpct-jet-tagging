@@ -1,0 +1,97 @@
+{
+  "experiment_name": "Ablation Matrix (pn_lite, WP=0.7)",
+  "findings": [
+    {
+      "type": "NULL_RESULT_NO_SIGNIFICANT_GAIN",
+      "severity": "NULL_RESULT_REPORT",
+      "message": "Dynamic PI-WPCT mean light rejection change was +0.00 (95% Paired Bootstrap CI: [+0.00, +0.00]). Because the confidence interval spans zero, the difference is NOT statistically significant. Academic integrity requires reporting this as a null result rather than claiming a gain."
+    },
+    {
+      "type": "SCOPE_BOUNDARY_STATEMENT",
+      "severity": "INFORMATIONAL",
+      "message": "PI-WPCT is a lightweight, periodic loss-reweighting scheme. It does NOT backpropagate through a downstream profile likelihood fit or claim INFERNO/SANNT-scale full-uncertainty optimization. Results are strictly scoped to working-point background mistag reduction and exact conformal calibration."
+    }
+  ],
+  "regimes": {
+    "baseline_ce": {
+      "accuracy": 0.9827777777777778,
+      "macro_auc": 0.9984770370370372,
+      "eps_b": 0.7,
+      "r_light": 0.0,
+      "r_charm": 0.0,
+      "rej_light": 1000000.0,
+      "rej_charm": 1000000.0,
+      "marginal_coverage": 0.8933333333333333,
+      "mean_set_size": 0.9011111111111111,
+      "ece": 0.04515751749277115
+    },
+    "wpct": {
+      "accuracy": 0.8655555555555555,
+      "macro_auc": 0.9955622222222221,
+      "eps_b": 0.7,
+      "r_light": 0.0,
+      "r_charm": 0.0,
+      "rej_light": 1000000.0,
+      "rej_charm": 1000000.0,
+      "marginal_coverage": 0.89,
+      "mean_set_size": 0.9027777777777778,
+      "ece": 0.1078651289145152
+    },
+    "pi_wpct": {
+      "accuracy": 0.835,
+      "macro_auc": 0.9780681481481482,
+      "eps_b": 0.7,
+      "r_light": 0.0,
+      "r_charm": 0.006666666666666667,
+      "rej_light": 1000000.0,
+      "rej_charm": 150.0,
+      "marginal_coverage": 0.8861111111111111,
+      "mean_set_size": 1.0161111111111112,
+      "ece": 0.10559195243650009
+    }
+  },
+  "paired_comparisons": {
+    "target_wp": {
+      "mean_diff": 0.0,
+      "ci_lower": 0.0,
+      "ci_upper": 0.0,
+      "is_significant": false
+    },
+    "threshold": {
+      "mean_diff": 0.010837476897239686,
+      "ci_lower": 0.008956339955329896,
+      "ci_upper": 0.013547890186309858,
+      "is_significant": true
+    },
+    "eps_b": {
+      "mean_diff": 3.823359474555688e-05,
+      "ci_lower": -0.006993620414673032,
+      "ci_upper": 0.006849903497622775,
+      "is_significant": false
+    },
+    "r_light": {
+      "mean_diff": 0.0,
+      "ci_lower": 0.0,
+      "ci_upper": 0.0,
+      "is_significant": false
+    },
+    "r_charm": {
+      "mean_diff": 0.0025857800583431317,
+      "ci_lower": -0.0037488433796724137,
+      "ci_upper": 0.013514658726523132,
+      "is_significant": false
+    },
+    "rej_light": {
+      "mean_diff": 0.0,
+      "ci_lower": 0.0,
+      "ci_upper": 0.0,
+      "is_significant": false
+    },
+    "rej_charm": {
+      "mean_diff": -332944.5094357142,
+      "ci_lower": -999925.75625,
+      "ci_upper": 160.2958333333326,
+      "is_significant": false
+    }
+  }
+}

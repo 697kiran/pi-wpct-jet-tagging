@@ -1,0 +1,14 @@
+# Baseline CE Regime
+regime: "baseline_ce"
+description: "Standard cross-entropy classifier with raw softmax operating-point threshold"
+loss:
+  type: "cross_entropy"
+optimizer:
+  type: "adamw"
+  lr: 0.001
+  weight_decay: 1e-4
+scheduler:
+  type: "cosine"
+  eta_min: 1e-5
+post_hoc_calibration: null
+conformal_calibration: false

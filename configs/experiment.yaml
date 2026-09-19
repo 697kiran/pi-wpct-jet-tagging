@@ -1,0 +1,41 @@
+# Experiment Master Configuration
+project: "pi-wpct-jet-tagging"
+author: "Amrita Vishwa Vidyapeetham - Team 6"
+guide: "Dr. Vivek Menon"
+
+experiment:
+  # Candidate working points (target b-efficiencies)
+  target_wps: [0.50, 0.70, 0.77, 0.85]
+  default_wp: 0.70
+
+  # Seeds for statistical reproducibility
+  seeds: [42, 101, 2024]
+  default_seed: 42
+
+  # Training budget
+  epochs: 10
+  pilot_epochs: 3
+
+  # Conformal calibration parameters
+  conformal:
+    alpha: 0.10          # 90% target coverage
+    scores: ["residual", "raps"]
+    raps_kreg: 1
+    raps_lam: 0.01
+
+  # Statistical evaluation
+  evaluation:
+    bootstrap_samples: 1000
+    bootstrap_ci_level: 0.95
+    mcnemar_alpha: 0.05
+    robustness_perturbations:
+      jes_factors: [0.95, 0.98, 1.00, 1.02, 1.05]
+      jer_smear_factors: [0.0, 0.05, 0.10, 0.15]
+      ip_smear_sigmas: [0.0, 0.02, 0.05, 0.10]
+      track_drop_rates: [0.0, 0.05, 0.10, 0.15]
+
+  # Logging and outputs
+  output_dir: "outputs"
+  checkpoint_dir: "checkpoints"
+  plots_dir: "plots"
+  logs_dir: "logs"

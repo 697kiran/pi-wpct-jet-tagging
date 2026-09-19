@@ -1,0 +1,8 @@
+# LorentzNet-small configuration
+name: "lorentznet_small"
+n_scalar: 12        # constituent scalar features (excluding 4-vectors)
+n_hidden: 64
+n_layers: 3
+num_classes: 3
+dropout: 0.1
+c_weight: 1e-3

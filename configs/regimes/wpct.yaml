@@ -1,0 +1,20 @@
+# WPCT Regime (Working-Point Conformal Training with static weights)
+regime: "wpct"
+description: "Working-point-specific loss with fixed/asymmetrically tuned background penalties"
+loss:
+  type: "wpct"
+  lambda_eff: 2.0         # weight for |epsilon_b - w| penalty
+  lambda_bg: 1.0          # total background mistag weight scale
+  lambda_light: 0.7       # fixed light mistag weight
+  lambda_charm: 0.3       # fixed charm mistag weight
+  temperature: 0.05       # sigmoid relaxation temperature for soft WP
+optimizer:
+  type: "adamw"
+  lr: 0.001
+  weight_decay: 1e-4
+scheduler:
+  type: "cosine"
+  eta_min: 1e-5
+post_hoc_calibration: null
+conformal_calibration: true
+conformal_method: "mondrian"

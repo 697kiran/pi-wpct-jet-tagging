@@ -1,0 +1,49 @@
+# Dataset and Split Configuration
+# JetClass 3-class subset (light=0, charm=1, b=2)
+
+data:
+  # Paths
+  raw_dir: "data/raw/JetClass"
+  processed_dir: "data/processed"
+  split_manifest: "data/splits/canonical_split_manifest.json"
+  split_dir: "data/splits"
+
+  # Split ratios: train / val / calibration / test
+  split_fractions:
+    train: 0.60
+    val: 0.15
+    calibration: 0.10
+    test: 0.15
+
+  # Feature transformations
+  transformations:
+    tanh_d0: true
+    tanh_dz: true
+    clip_pt: true
+    pt_scale: 100.0   # GeV normalization
+
+  # Pilot mode configuration
+  pilot:
+    enabled: true
+    n_samples: 12000
+    # Provisional pilot class ratio ~4:1:1 (light:b:c), explicitly flagged in metadata
+    class_ratio:
+      light: 4
+      charm: 1
+      b: 1
+    # Number of particles/constituents per jet
+    num_particles: 32
+    feature_dim: 16
+
+  # Full dataset physics cross-section yields (or empirical JetClass yields)
+  yields:
+    light: 100000.0
+    charm: 25000.0
+    b: 25000.0
+
+  # DataLoader parameters
+  dataloader:
+    batch_size: 256
+    num_workers: 0
+    pin_memory: false
+    drop_last: false

@@ -1,0 +1,28 @@
+# PI-WPCT Regime (Physics-Impact Weighted Working-Point Conformal Training)
+regime: "pi_wpct"
+description: "WPCT with periodic physics-impact risk allocation for light/charm mistag penalty weights"
+loss:
+  type: "pi_wpct"
+  lambda_eff: 2.0         # weight for |epsilon_b - w| penalty
+  lambda_bg: 1.0          # total background mistag weight scale
+  temperature: 0.05       # sigmoid relaxation temperature for soft WP
+  initial_lambda_light: 0.5
+  initial_lambda_charm: 0.5
+risk_allocator:
+  refresh_interval_k: 2   # refresh weights every K epochs
+  variance_stabilization:
+    method: "wilson_floor" # "wilson_floor", "min_floor", or "laplace"
+    min_variance_floor: 1.0e-7
+    z_score: 1.96
+    regularization_samples: 10
+  zero_sum_guard_epsilon: 1.0e-12
+optimizer:
+  type: "adamw"
+  lr: 0.001
+  weight_decay: 1e-4
+scheduler:
+  type: "cosine"
+  eta_min: 1e-5
+post_hoc_calibration: null
+conformal_calibration: true
+conformal_method: "mondrian"

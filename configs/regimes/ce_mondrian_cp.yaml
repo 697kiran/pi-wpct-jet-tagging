@@ -1,0 +1,17 @@
+# CE + Mondrian CP Regime
+regime: "ce_mondrian_cp"
+description: "Standard cross-entropy classifier followed by exact class-conditional Mondrian conformal calibration"
+loss:
+  type: "cross_entropy"
+optimizer:
+  type: "adamw"
+  lr: 0.001
+  weight_decay: 1e-4
+scheduler:
+  type: "cosine"
+  eta_min: 1e-5
+post_hoc_calibration: null
+conformal_calibration: true
+conformal_method: "mondrian"
+conformal_score: "residual"  # "residual" or "raps"
+alpha: 0.10                 # Target error rate (90% coverage)

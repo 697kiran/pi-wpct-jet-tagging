@@ -1,0 +1,14 @@
+# CE + Temperature Scaling Regime
+regime: "ce_temp_scaling"
+description: "Standard cross-entropy classifier followed by post-hoc temperature scaling"
+loss:
+  type: "cross_entropy"
+optimizer:
+  type: "adamw"
+  lr: 0.001
+  weight_decay: 1e-4
+scheduler:
+  type: "cosine"
+  eta_min: 1e-5
+post_hoc_calibration: "temperature_scaling"
+conformal_calibration: false

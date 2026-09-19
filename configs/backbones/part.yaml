@@ -1,0 +1,10 @@
+# Particle Transformer (ParT) configuration
+name: "part"
+input_dim: 16
+num_classes: 3
+embed_dim: 64
+num_heads: 4
+num_layers: 3
+mlp_ratio: 2.0
+dropout: 0.1
+attention_dropout: 0.1

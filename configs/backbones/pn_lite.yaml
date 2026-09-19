@@ -1,0 +1,11 @@
+# ParticleNet-Lite configuration
+name: "pn_lite"
+input_dim: 16
+k_neighbors: 8
+conv_params:
+  - [32, 32]
+  - [64, 64]
+fc_params:
+  - [128, 0.1]
+num_classes: 3
+pooling: "mean"
