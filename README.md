@@ -6,7 +6,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 
 **Physics-Impact Weighted Working-Point Conformal Training (PI-WPCT) for Robust and Calibration-Aware Jet Flavour Tagging at the LHC.**  
-*Amrita Vishwa Vidyapeetham, Amritapuri — 23AID498 Project (Team 6)*  
+*Amrita Vishwa Vidyapeetham, Amritapuri — 23AID498 Project (Team: 6)*  
 *Guide: Dr. Vivek Menon*  
 *Team Members: R Kiran, Kurt Sony Rebello, Adityan Rajesh P*
 
