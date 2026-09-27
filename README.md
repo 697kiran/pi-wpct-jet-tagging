@@ -1,6 +1,5 @@
 # Physics-Impact Weighted Working-Point Conformal Training (PI-WPCT)
 
-[![CI](https://github.com/697kiran/pi-wpct-jet-tagging/actions/workflows/ci.yml/badge.svg)](https://github.com/697kiran/pi-wpct-jet-tagging/actions)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
