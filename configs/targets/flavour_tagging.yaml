@@ -1,0 +1,7 @@
+target:
+  mode: flavour_tagging
+  semantics: "Per-jet light/charm/b flavour tagging; requires verified flavour annotations."
+  classes:
+    - {name: light, branch: label_light}
+    - {name: charm, branch: label_charm}
+    - {name: b, branch: label_b}

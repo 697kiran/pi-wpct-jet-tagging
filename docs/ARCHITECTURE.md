@@ -9,19 +9,19 @@
 
 ## 1. High-Level Architecture Overview
 
-The system extends Working-Point Conformal Training (WPCT) for 3-class jet flavour tagging ($b$-jet vs $c$-jet vs light-jet) using the JetClass dataset. The core innovation is a **periodic, non-differentiable risk-allocation mechanism** that dynamically sets the relative loss weights between light and charm mistags based on a physics-motivated downstream purity proxy.
+The project's scientific objective is three-class jet-flavour tagging ($b$-jet vs $c$-jet vs light-jet). The inspected JetClass ROOT files expose generated-process labels (QCD, Hbb, Hcc, etc.), not per-jet flavour. The ingestion pipeline keeps those targets distinct: process classification is available as a separate task, while flavour-tagging conversion requires verified flavour annotations and fails if they are absent. The core PI-WPCT mechanism remains a **periodic, non-differentiable risk-allocation method** for light and charm mistags on a valid flavour target.
 
 ```
 +-----------------------------------------------------------------------------+
-|                             JETCLASS 3-CLASS DATA                           |
+|        EXPLICIT SYNTHETIC PILOT OR EXPLICIT REAL ROOT/TAR TARGET             |
 +-----------------------------------------------------------------------------+
                                       |
                                       v
 +-----------------------------------------------------------------------------+
-|                 LAYER 1: PREPROCESSING & CANONICAL 4-WAY SPLIT              |
-|        - tanh(d0), tanh(dz) impact parameter transforms                     |
-|        - Strictly disjoint: train / val / cal / test                        |
-|        - Content-hashed SHA-256 manifest artifact                           |
+|        LAYER 1: ROOT/TAR CONVERSION OR EXPLICIT PILOT & 4-WAY SPLIT          |
+|        - Named 17-feature schema; separate points, four-vectors, mask       |
+|        - Jagged mmap shards and portable source-member manifest             |
+|        - Train / validation / calibration / test; source-file cal split     |
 +-----------------------------------------------------------------------------+
           |                         |                        |
           | (train only)            | (val only)             | (cal only)
@@ -82,14 +82,21 @@ The system extends Working-Point Conformal Training (WPCT) for 3-class jet flavo
 
 ## 2. The Seven Logical Layers
 
-### Layer 1: Data Ingestion and Canonical Splits (`src/piwpct/data.py`)
-- Filters JetClass into the 3-class flavour tagging task: light quarks/gluons ($0$), charm ($1$), bottom ($2$).
-- Computes non-linear impact parameter transforms $\tanh(d_0), \tanh(d_z)$ to tame high-energy tails while preserving linear resolution near zero.
-- Produces the canonical 4-way split (`train`, `validation`, `calibration`, `test`). A content-hashed JSON manifest (`canonical_split_manifest.json`) records SHA-256 checksums and exact indices.
-- Supports **pilot mode** with provisional light:b:c class ratio ~4:1:1, explicitly flagged in metadata and logs.
+### Layer 1: Data Ingestion and Canonical Splits (`src/piwpct/root_data.py`, `src/piwpct/data.py`)
+- `scripts/convert_root.py` reads TAR archives and ROOT tree `tree` in bounded chunks, one ROOT member at a time. Raw input is read-only; staged members are cleaned after conversion.
+- `src/piwpct/schema.py` is authoritative for the ordered 17 candidate model features, raw jagged fields, points, and four-vectors. The candidate transforms were compared against the [official Particle Transformer JetClass feature configuration](https://github.com/jet-universe/particle_transformer/blob/main/data/JetClass/JetClass_full.yaml).
+- Prepared data is stored as flat jagged `particles.npy` and `offsets.npy`, plus per-jet metadata, labels, and stable file/entry sample IDs. The DataLoader memory-maps shards, pads/truncates per batch, and derives masks from offsets rather than feature values.
+- Official train/validation/test archive partitions are preserved. Whole ROOT source members are reserved deterministically from training for calibration; entries from one source member never cross the train/calibration boundary.
+- Pilot mode remains a separate, explicitly selected synthetic dataset with provisional light:charm:b composition. Pilot labels do not represent real detector or truth annotations.
+
+### Target modes and scientific scope
+
+- `process_classification` uses explicit JetClass process labels. It is useful for a separately selected process-classification task and pipeline smoke testing. It is not jet-flavour tagging.
+- `flavour_tagging` requires verified per-jet light/charm/b annotations. The inspected ROOT schema does not provide those branches, so this mode raises an informative unsupported-target error.
+- No code maps `label_QCD` to light flavour or treats Hbb/Hcc process labels as per-jet truth. WPCT and PI-WPCT are blocked for process-classification targets because their working point and risks depend on b efficiency and light/charm mistag semantics.
 
 ### Layer 2: Backbone Inference (`src/piwpct/backbones/`)
-All backbones adhere to a uniform forward interface:
+All backbones adhere to a uniform forward interface (with $K$ target classes):
 ```python
 forward(features, points=None, mask=None, vectors=None, high_level=None) -> logits [B, 3]
 ```
@@ -104,6 +111,7 @@ $$\mathcal{L}(w) = \mathcal{L}_{\text{CE}} + \lambda_{\text{eff}} |\epsilon_b^{\
 - `WPCTLoss`: Uses fixed or manually-tuned static $\lambda_{\text{light}}, \lambda_{\text{charm}}$.
 - `PIWPCTLoss`: Identical skeleton, but $\lambda_{\text{light}}(w), \lambda_{\text{charm}}(w)$ are injected at epoch boundaries from `RiskAllocator` as read-only scalar parameters.
 - `ConfTrLoss`: Differentiable conformal training loss (Stutz et al., ICLR 2022) with smooth coverage and set-size penalties.
+- WPCT and PI-WPCT apply only to verified flavour targets; generic cross-entropy supports an explicitly selected process-classification task.
 
 ### Layer 4: Shared Training Loop (`src/piwpct/train.py`)
 - Standard gradient backpropagation on the `train` split only.
@@ -126,7 +134,7 @@ Executed strictly under `torch.no_grad()` on held-out **validation data only**:
    with fallback guards if $R_{\text{light}} + R_{\text{charm}} < \epsilon$.
 
 ### Layer 6: Exact Mondrian Conformal Calibration (`src/piwpct/conformal.py`)
-- Frozen model logits on the separate, held-out **calibration split** are used to fit exact class-conditional quantiles $\hat{q}_k$ for $k \in \{0, 1, 2\}$.
+- Frozen model logits on the separate, held-out **calibration split** are used to fit exact class-conditional quantiles $\hat{q}_k$ for the configured target classes.
 - For any test sample $X$, the prediction set is $C(X) = \{k : s(X, k) \le \hat{q}_k\}$.
 - Guarantees finite-sample conditional coverage:
   $$P(Y \in C(X) \mid Y = k) \ge 1 - \alpha$$

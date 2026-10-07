@@ -5,10 +5,11 @@ Operates on particle 4-momenta (px, py, pz, E) and constituent scalar features.
 Reference: Gong et al., LorentzNet, JHEP 2022.
 """
 
-from typing import Optional
+from typing import Optional, Sequence
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from piwpct.schema import FEATURE_INDEX, FEATURE_NAMES
 
 
 def minkowski_dot(p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
@@ -99,18 +100,29 @@ class LGEB(nn.Module):
 
 
 class LorentzNetSmall(nn.Module):
-    """Compact LorentzNet model for 3-class jet tagging."""
+    """Compact LorentzNet model for a configurable jet classification target."""
 
     def __init__(
         self,
-        n_scalar: int = 12,
+        n_scalar: int = len(FEATURE_NAMES),
+        scalar_feature_names: Optional[Sequence[str]] = None,
         n_hidden: int = 64,
         n_layers: int = 3,
         num_classes: int = 3,
         dropout: float = 0.1,
     ):
         super().__init__()
-        self.n_scalar = n_scalar
+        names = tuple(scalar_feature_names or FEATURE_NAMES)
+        if len(names) != n_scalar:
+            raise ValueError(
+                f"n_scalar={n_scalar} disagrees with scalar_feature_names length {len(names)}."
+            )
+        unknown = [name for name in names if name not in FEATURE_INDEX]
+        if unknown:
+            raise ValueError(f"Unknown LorentzNet scalar feature names: {unknown}.")
+        self.scalar_feature_names = names
+        self.scalar_feature_indices = tuple(FEATURE_INDEX[name] for name in names)
+        self.n_scalar = len(names)
         self.embedding = nn.Sequential(
             nn.Linear(n_scalar, n_hidden),
             nn.SiLU(),
@@ -143,23 +155,15 @@ class LorentzNetSmall(nn.Module):
         if mask is None:
             mask = torch.ones((B, N), device=features.device, dtype=torch.float32)
 
+        if C != len(FEATURE_NAMES):
+            raise ValueError(
+                f"LorentzNet expects the {len(FEATURE_NAMES)}-feature schema, received {C} channels."
+            )
         if vectors is None:
-            # Reconstruct dummy 4-vectors from eta, phi, log_pt, log_e if not provided
-            pt = torch.exp(features[:, :, 2])
-            e = torch.exp(features[:, :, 3])
-            eta = features[:, :, 0]
-            phi = features[:, :, 1]
-            px = pt * torch.cos(phi)
-            py = pt * torch.sin(phi)
-            pz = pt * torch.sinh(eta)
-            vectors = torch.stack([px, py, pz, e], dim=-1)
-
-        # Slice scalar features up to n_scalar (or pad if fewer)
-        if C >= self.n_scalar:
-            scalars = features[:, :, :self.n_scalar]
-        else:
-            pad = torch.zeros((B, N, self.n_scalar - C), device=features.device)
-            scalars = torch.cat([features, pad], dim=-1)
+            raise ValueError("LorentzNet requires explicit raw four-vectors; it does not infer them from features.")
+        if vectors.shape != (B, N, 4):
+            raise ValueError(f"LorentzNet vectors must have shape {(B, N, 4)}, got {tuple(vectors.shape)}.")
+        scalars = features[:, :, list(self.scalar_feature_indices)]
 
         h = self.embedding(scalars) * mask.unsqueeze(-1)
         x = vectors

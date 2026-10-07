@@ -7,7 +7,8 @@ Operates on constituent spatial coordinates (Delta eta, Delta phi) and feature c
 from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from piwpct.schema import FEATURE_NAMES
 
 
 def pairwise_distance(x: torch.Tensor) -> torch.Tensor:
@@ -99,11 +100,11 @@ class EdgeConvBlock(nn.Module):
 
 
 class ParticleNetLite(nn.Module):
-    """ParticleNet-Lite model for 3-class jet tagging."""
+    """ParticleNet-Lite model for a configurable jet classification target."""
 
     def __init__(
         self,
-        input_dim: int = 16,
+        input_dim: int = len(FEATURE_NAMES),
         num_classes: int = 3,
         k_neighbors: int = 8,
         conv_params: Optional[List[List[int]]] = None,

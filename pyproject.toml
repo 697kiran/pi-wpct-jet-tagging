@@ -15,17 +15,21 @@ authors = [
 license = { text = "MIT" }
 requires-python = ">=3.8"
 dependencies = [
-    "torch>=2.0.0",
     "numpy>=1.20.0",
     "scipy>=1.7.0",
     "scikit-learn>=1.0.0",
     "matplotlib>=3.5.0",
     "pyyaml>=6.0",
+    "uproot>=5.3,<6",
+    "awkward>=2.6,<3",
     "xgboost>=1.6.0",
     "lightgbm>=3.3.0",
 ]
 
 [project.optional-dependencies]
+training = [
+    "torch>=2.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -35,6 +39,12 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

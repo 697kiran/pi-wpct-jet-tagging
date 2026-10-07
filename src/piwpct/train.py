@@ -9,10 +9,9 @@ Supports:
 """
 
 import copy
-import json
 import os
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 import numpy as np
 import torch
 import torch.nn as nn
@@ -34,7 +33,7 @@ class TemperatureScaler(nn.Module):
         self.temperature = nn.Parameter(torch.ones(1) * 1.5)
 
     def forward(self, logits: torch.Tensor) -> torch.Tensor:
-        return logits / self.temperature
+        return logits / torch.clamp(self.temperature, min=1e-6)
 
     def fit(self, val_logits: np.ndarray, val_labels: np.ndarray) -> float:
         optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
@@ -49,7 +48,26 @@ class TemperatureScaler(nn.Module):
             return loss
 
         optimizer.step(_eval)
+        with torch.no_grad():
+            self.temperature.clamp_(min=1e-6)
         return float(self.temperature.item())
+
+
+def apply_temperature(logits: np.ndarray, temperature: float) -> np.ndarray:
+    """Apply one validated scalar temperature to logits for any evaluation split."""
+    value = float(temperature)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"Temperature must be positive and finite, received {temperature!r}.")
+    return np.asarray(logits) / value
+
+
+def scale_calibration_and_test_logits(
+    calibration_logits: np.ndarray,
+    test_logits: np.ndarray,
+    temperature: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Apply the same fitted transform before conformal calibration and test scoring."""
+    return apply_temperature(calibration_logits, temperature), apply_temperature(test_logits, temperature)
 
 
 def build_loss(regime: str, config: Dict[str, Any], target_wp: float) -> nn.Module:
@@ -148,6 +166,7 @@ def evaluate_epoch(
     loss_fn: nn.Module,
     device: torch.device,
     target_wp: float,
+    collect_outputs: bool = True,
 ) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
     """Evaluate model on validation split."""
     model.eval()
@@ -174,11 +193,12 @@ def evaluate_epoch(
         total_loss += float(loss.item())
         n_batches += 1
 
-        all_logits.append(logits.detach().cpu().numpy())
-        all_labels.append(batch["labels"].numpy())
+        if collect_outputs:
+            all_logits.append(logits.detach().cpu().numpy())
+            all_labels.append(batch["labels"].numpy())
 
-    logits_arr = np.concatenate(all_logits, axis=0)
-    labels_arr = np.concatenate(all_labels, axis=0)
+    logits_arr = np.concatenate(all_logits, axis=0) if all_logits else np.empty((0, 0), dtype=np.float32)
+    labels_arr = np.concatenate(all_labels, axis=0) if all_labels else np.empty((0,), dtype=np.int64)
     return {"val_loss": total_loss / max(n_batches, 1)}, logits_arr, labels_arr
 
 
@@ -196,6 +216,15 @@ def train_pipeline(
     logger = setup_logger(f"train.{regime}.{backbone_name}")
     logger.info(f"Starting run: regime={regime}, backbone={backbone_name}, wp={target_wp}, seed={seed}")
 
+    train_dataset = dataloaders["train"].dataset
+    target_mode = getattr(train_dataset, "target_mode", "flavour_tagging")
+    class_names = list(getattr(train_dataset, "class_names", ["light", "charm", "b"]))
+    if target_mode == "process_classification" and regime in {"wpct", "pi_wpct"}:
+        raise ValueError(
+            "WPCT/PI-WPCT use b-efficiency and light/charm mistag semantics; they cannot be applied "
+            "to JetClass process classes. Use a generic classification regime or a valid flavour target."
+        )
+
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
     run_dir = os.path.join(output_dir, f"{regime}_{backbone_name}_wp{int(target_wp*100)}_seed{seed}")
     os.makedirs(run_dir, exist_ok=True)
@@ -204,14 +233,21 @@ def train_pipeline(
     trajectory_logger = TrajectoryLogger(trajectory_path)
 
     # Instantiate backbone
-    backbone_cfg = config.get("backbone", {})
+    backbone_cfg = dict(config.get("backbone", {}))
+    if target_mode == "process_classification":
+        backbone_cfg["num_classes"] = len(class_names)
     model = build_backbone(backbone_name, backbone_cfg).to(device)
 
     # If backbone is GBT, handle tree training directly
     if isinstance(model, GBTModel):
+        if not hasattr(train_dataset, "data"):
+            raise ValueError(
+                "GBT training currently needs dense high-level arrays and is not available for "
+                "memory-mapped jagged real-data shards. Choose a neural backbone."
+            )
         logger.info("Fitting Gradient Boosted Trees model...")
-        train_ds = dataloaders["train"].dataset
-        val_ds = dataloaders["validation"].dataset
+        train_ds = cast(Any, dataloaders["train"].dataset)
+        val_ds = cast(Any, dataloaders["validation"].dataset)
         X_tr = train_ds.data["high_level"]
         y_tr = train_ds.data["labels"]
         X_va = val_ds.data["high_level"]
@@ -258,7 +294,7 @@ def train_pipeline(
     if regime == "pi_wpct" and risk_allocator is not None:
         logger.info("Performing pre-training (epoch 0) risk allocation refresh on validation split...")
         res = risk_allocator.refresh(model, dataloaders["validation"], target_wp, device)
-        loss_fn.update_weights(res.lambda_light, res.lambda_charm)
+        cast(PIWPCTLoss, loss_fn).update_weights(res.lambda_light, res.lambda_charm)
         trajectory_logger.log_refresh(
             epoch=0,
             target_wp=target_wp,
@@ -288,7 +324,8 @@ def train_pipeline(
         t0 = time.time()
         train_metrics = train_epoch(model, dataloaders["train"], optimizer, loss_fn, device, target_wp)
         val_metrics, val_logits, val_labels = evaluate_epoch(
-            model, dataloaders["validation"], loss_fn, device, target_wp
+            model, dataloaders["validation"], loss_fn, device, target_wp,
+            collect_outputs=False,
         )
         elapsed = time.time() - t0
 
@@ -300,7 +337,7 @@ def train_pipeline(
         # Periodic risk refresh hook for PI-WPCT at K-epoch boundaries
         if regime == "pi_wpct" and risk_allocator is not None and (epoch % refresh_interval_k == 0):
             res = risk_allocator.refresh(model, dataloaders["validation"], target_wp, device)
-            loss_fn.update_weights(res.lambda_light, res.lambda_charm)
+            cast(PIWPCTLoss, loss_fn).update_weights(res.lambda_light, res.lambda_charm)
             trajectory_logger.log_refresh(
                 epoch=epoch,
                 target_wp=target_wp,
@@ -341,9 +378,11 @@ def train_pipeline(
     # Save checkpoint with rich metadata
     checkpoint_path = os.path.join(run_dir, "checkpoint.pt")
     manifest_hash = "unknown"
-    if hasattr(dataloaders["train"].dataset, "auditor") and dataloaders["train"].dataset.auditor:
-        if dataloaders["train"].dataset.auditor.manifest_path:
-            manifest_hash = SplitAuditor.compute_sha256(dataloaders["train"].dataset.auditor.manifest_path)
+    dataset_auditor = getattr(train_dataset, "auditor", None)
+    if dataset_auditor and dataset_auditor.manifest_path:
+        manifest_hash = SplitAuditor.compute_sha256(dataset_auditor.manifest_path)
+    elif hasattr(train_dataset, "manifest_path"):
+        manifest_hash = SplitAuditor.compute_sha256(str(train_dataset.manifest_path))
 
     torch.save(
         {
@@ -355,6 +394,8 @@ def train_pipeline(
             "epochs": epochs,
             "git_commit": get_git_commit_hash(),
             "manifest_hash": manifest_hash,
+            "target_mode": target_mode,
+            "class_names": class_names,
             "config": config,
             "trajectories": trajectory_logger.get_trajectories(),
             "temperature": float(temp_scaler.temperature.item()) if temp_scaler else 1.0,

@@ -6,20 +6,25 @@ Determines whether there is sufficient WP-dependent risk variation to justify PI
 and alerts if the risk ratio is flat (failure/negative result criterion §9.3).
 
 Usage:
-    python scripts/run_pretraining_diagnostic.py --config configs/experiment.yaml
+    python scripts/run_pretraining_diagnostic.py --pilot --config configs/experiment.yaml
 """
 
 import argparse
 import os
 import sys
 import yaml
-import numpy as np
 import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from piwpct.backbones import build_backbone
+from piwpct.cli_data import (
+    SplitManifestError,
+    add_data_mode_arguments,
+    ensure_split_manifest,
+)
 from piwpct.data import get_dataloaders
+from piwpct.data_paths import load_data_config, resolve_data_root
 from piwpct.evaluation.plots import plot_risk_curves
 from piwpct.risk_allocator import RiskAllocator
 from piwpct.utils.seeding import seed_everything
@@ -27,27 +32,62 @@ from piwpct.utils.seeding import seed_everything
 
 def main():
     parser = argparse.ArgumentParser(description="Run mandatory pre-training PI-WPCT diagnostic.")
+    add_data_mode_arguments(parser)
     parser.add_argument("--config", type=str, default="configs/experiment.yaml", help="Path to experiment config")
-    parser.add_argument("--split-manifest", type=str, default="data/splits/canonical_split_manifest.json", help="Manifest path")
+    parser.add_argument("--split-manifest", type=str, default=None, help="Manifest path")
+    parser.add_argument("--prepared-data-root", type=str, default=None, help="Prepared real-data root")
+    parser.add_argument("--workers", type=int, default=None, help="DataLoader workers")
+    parser.add_argument("--pin-memory", action="store_true", help="Pin batches for accelerator transfer")
+    parser.add_argument("--particle-cap", type=int, default=None, help="Batch-time particle cap")
+    parser.add_argument("--target-mode", choices=("process_classification", "flavour_tagging"),
+                        help="Required with --real-data; PI-WPCT diagnostics require a flavour target")
+    parser.add_argument("--allow-incomplete-data", action="store_true",
+                        help="Allow a bounded smoke-conversion manifest for testing only")
     parser.add_argument("--checkpoint", type=str, default=None, help="Optional model checkpoint to evaluate")
     parser.add_argument("--output-plot", type=str, default="plots/pretraining_risk_diagnostic.png", help="Path to save plot")
-    parser.add_argument("--pilot", action="store_true", default=False, help="Generate pilot split if missing")
     args = parser.parse_args()
+
+    if args.data_mode == "real" and args.target_mode is None:
+        parser.error("--real-data requires an explicit --target-mode matching the prepared manifest.")
 
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
     seed_everything(config.get("experiment", {}).get("default_seed", 42))
 
-    # Check if manifest exists, if not and pilot flag is given, create it
-    if not os.path.exists(args.split_manifest):
-        print(f"[!] Split manifest '{args.split_manifest}' not found. Building pilot split...")
-        from piwpct.data import create_canonical_splits, generate_pilot_dataset
-        data = generate_pilot_dataset(n_samples=12000, seed=42)
-        os.makedirs(os.path.dirname(args.split_manifest), exist_ok=True)
-        create_canonical_splits(data, output_dir=os.path.dirname(args.split_manifest), seed=42, is_pilot=True)
+    data_config = load_data_config(os.path.join(os.path.dirname(__file__), "..", "configs", "data.yaml"))
+    prepared_root, _ = resolve_data_root("prepared_data_root", args.prepared_data_root, data_config)
+    manifest_path = args.split_manifest or (
+        str(prepared_root / "canonical_split_manifest.json")
+        if args.data_mode == "real" else "data/splits/canonical_split_manifest.json"
+    )
+    try:
+        manifest = ensure_split_manifest(
+            manifest_path,
+            data_mode=args.data_mode,
+            generate_pilot_if_missing=(args.data_mode == "pilot"),
+            seed=config.get("experiment", {}).get("default_seed", 42),
+        )
+    except SplitManifestError as exc:
+        parser.error(str(exc))
 
-    dataloaders = get_dataloaders(args.split_manifest, batch_size=256)
+    target_mode = manifest.get("target_definition", {}).get("mode", "flavour_tagging")
+    if args.data_mode == "real" and target_mode != args.target_mode:
+        parser.error(f"Requested target mode {args.target_mode!r} does not match manifest target {target_mode!r}.")
+    if target_mode != "flavour_tagging":
+        parser.error("PI-WPCT risk diagnostics require valid light/charm/b labels; process classes are not flavour tags.")
+
+    dataloader_cfg = data_config.get("dataloader", {})
+    workers = args.workers if args.workers is not None else int(dataloader_cfg.get("num_workers", 0))
+    dataloaders = get_dataloaders(
+        manifest_path,
+        batch_size=int(dataloader_cfg.get("batch_size", 256)),
+        num_workers=workers,
+        pin_memory=args.pin_memory or bool(dataloader_cfg.get("pin_memory", False)),
+        shuffle_buffer_size=int(dataloader_cfg.get("shuffle_buffer_size", 8192)),
+        particle_cap=args.particle_cap,
+        allow_incomplete=args.allow_incomplete_data,
+    )
     val_loader = dataloaders["validation"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -66,9 +106,9 @@ def main():
     allocator = RiskAllocator(lambda_bg=1.0)
     target_wps = config.get("experiment", {}).get("target_wps", [0.50, 0.70, 0.77, 0.85])
 
-    print(f"\n=================================================================")
-    print(f"   MANDATORY PRE-TRAINING PI-WPCT RISK DIAGNOSTIC (§6 & §9.2)     ")
-    print(f"=================================================================")
+    print("\n=================================================================")
+    print("   MANDATORY PRE-TRAINING PI-WPCT RISK DIAGNOSTIC (§6 & §9.2)     ")
+    print("=================================================================")
     print(f"Evaluating validation split over candidate WPs: {target_wps}\n")
 
     r_light_risks = []

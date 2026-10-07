@@ -1,12 +1,10 @@
 """Tests for data generation, impact parameter transforms, and canonical splits."""
 
-import json
 import os
 import numpy as np
-import pytest
 
 from piwpct.data import create_canonical_splits, generate_pilot_dataset, transform_impact_parameters
-from piwpct.utils.split_integrity import SplitAuditor, check_splits_disjoint
+from piwpct.utils.split_integrity import SplitAuditor
 
 
 def test_transform_impact_parameters():
@@ -23,9 +21,9 @@ def test_transform_impact_parameters():
 
 def test_generate_pilot_dataset():
     """Verify pilot dataset shapes, classes, and provisional composition."""
-    data = generate_pilot_dataset(n_samples=600, num_particles=16, feature_dim=16, seed=42)
+    data = generate_pilot_dataset(n_samples=600, num_particles=16, feature_dim=17, seed=42)
 
-    assert data["features"].shape == (600, 16, 16)
+    assert data["features"].shape == (600, 16, 17)
     assert data["points"].shape == (600, 16, 2)
     assert data["mask"].shape == (600, 16)
     assert data["vectors"].shape == (600, 16, 4)
@@ -44,7 +42,7 @@ def test_generate_pilot_dataset():
 
 def test_canonical_splits_creation_and_disjointness(tmp_path):
     """Verify that canonical 4-way split is strictly disjoint and content-hashed."""
-    data = generate_pilot_dataset(n_samples=1000, num_particles=16, feature_dim=16, seed=42)
+    data = generate_pilot_dataset(n_samples=1000, num_particles=16, feature_dim=17, seed=42)
     out_dir = str(tmp_path / "splits")
 
     manifest = create_canonical_splits(

@@ -1,7 +1,6 @@
 """Unit tests for the non-differentiable RiskAllocator math and edge cases."""
 
 import numpy as np
-import pytest
 import torch
 
 from piwpct.backbones.particlenet_lite import ParticleNetLite

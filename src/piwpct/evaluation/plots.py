@@ -1,9 +1,8 @@
 """Publication-quality plots for PI-WPCT evaluation, mechanism diagnostics, and robustness."""
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
-import numpy as np
 
 
 def set_plot_style():
@@ -96,11 +95,15 @@ def plot_conformal_coverage(
     """Plot exact Mondrian conformal empirical coverage vs target per class."""
     set_plot_style()
     names = class_names or ["Light", "Charm", "b"]
+    if len(names) <= max(per_class_coverage.keys(), default=-1):
+        names = ["Class %d" % index for index in sorted(per_class_coverage)]
     classes = sorted(per_class_coverage.keys())
     covs = [per_class_coverage[c] for c in classes]
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#9467bd", "#8c564b", "#17becf", "#bcbd22"]
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    bars = ax.bar([names[c] for c in classes], covs, color=["#1f77b4", "#ff7f0e", "#2ca02c"], width=0.5)
+    bars = ax.bar([names[c] for c in classes], covs,
+                  color=[colors[index % len(colors)] for index in range(len(classes))], width=0.5)
     ax.axhline(target_coverage, color="red", linestyle="--", linewidth=1.8, label=f"Target ({target_coverage*100:.0f}%)")
 
     for bar in bars:

@@ -7,10 +7,10 @@ Includes:
 - Statistical uncertainty (non-parametric and paired bootstrap CIs, McNemar test).
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple
 import numpy as np
 from scipy import stats
-from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 
 def compute_working_point_metrics(
@@ -103,8 +103,6 @@ def compute_ece(
 
     bin_boundaries = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
-    n_total = len(labels)
-
     for i in range(n_bins):
         bin_lower, bin_upper = bin_boundaries[i], bin_boundaries[i + 1]
         in_bin = (confidences > bin_lower) & (confidences <= bin_upper)

@@ -1,7 +1,6 @@
 """Tests for Mondrian (class-conditional) conformal calibration."""
 
 import numpy as np
-import pytest
 
 from piwpct.conformal import MondrianConformalCalibrator
 

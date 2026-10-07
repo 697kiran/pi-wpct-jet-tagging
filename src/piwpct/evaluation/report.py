@@ -11,7 +11,6 @@ Encodes academic honesty and statistical rigor by explicitly testing and surfaci
 import json
 import os
 from typing import Any, Dict, List, Optional
-import numpy as np
 
 
 class EvaluationReporter:

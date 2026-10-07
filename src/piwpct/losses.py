@@ -8,6 +8,7 @@ Includes:
 """
 
 from typing import Dict, Optional, Tuple
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -169,14 +170,16 @@ class PIWPCTLoss(WPCTLoss):
         logits: torch.Tensor,
         labels: torch.Tensor,
         target_wp: Optional[float] = None,
+        lambda_light: Optional[float] = None,
+        lambda_charm: Optional[float] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         return super().forward(
             logits,
             labels,
             target_wp=target_wp,
-            lambda_light=self.current_lambda_light,
-            lambda_charm=self.current_lambda_charm,
+            lambda_light=(self.current_lambda_light if lambda_light is None else lambda_light),
+            lambda_charm=(self.current_lambda_charm if lambda_charm is None else lambda_charm),
         )
 
 
@@ -238,9 +241,8 @@ class ConfTrLoss(nn.Module):
         return total_loss, metrics
 
 
-def np_quantile_safe(arr: torch.Tensor, q: float) -> float:
+def np_quantile_safe(arr: np.ndarray, q: float) -> float:
     """Compute quantile with clipping to [0, 1]."""
-    import numpy as np
     if len(arr) == 0:
         return 0.5
     q_clamped = max(0.0, min(1.0, float(q)))

@@ -35,12 +35,29 @@ htmlcov/
 # Large data arrays (keep directories and manifests)
 data/raw/
 data/processed/
+data/prepared/
+data/**/*.npy
 data/splits/*.npz
 !data/splits/canonical_split_manifest.json
+
+# ROOT archives and generated conversion staging data
+*.root
+*.tar
+*.tar.gz
+*.building-*/
+*.staging/
+*.log
+outputs/**/*.jsonl
+outputs/**/*.csv
+outputs/**/checkpoint*.pt
+outputs/**/checkpoint*.ckpt
+outputs/**/checkpoint*.pth
+outputs/**/events.out.tfevents.*
 
 # Model checkpoints
 checkpoints/
 outputs/**/*.pt
+outputs/**/*.ckpt
 
 # IDE
 .vscode/

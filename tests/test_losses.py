@@ -1,7 +1,6 @@
 """Tests for all loss functions (Baseline CE, WPCT, PI-WPCT, ConfTr)."""
 
 import torch
-import pytest
 
 from piwpct.losses import BaselineCELoss, ConfTrLoss, PIWPCTLoss, WPCTLoss
 

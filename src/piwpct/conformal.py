@@ -7,7 +7,7 @@ Unchanged across all backbones and training regimes.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 
@@ -99,20 +99,43 @@ class MondrianConformalCalibrator:
 
     def calibrate(self, cal_logits: np.ndarray, cal_labels: np.ndarray) -> None:
         """Fit class-conditional quantiles on held-out calibration data."""
-        cal_probs = self._softmax(cal_logits)
-        num_classes = cal_probs.shape[1]
+        self.calibrate_batches([(cal_logits, cal_labels)])
+
+    def calibrate_batches(
+        self, batches: Iterable[Tuple[np.ndarray, np.ndarray]]
+    ) -> None:
+        """Fit exact quantiles while retaining only one scalar score per sample."""
+        scores_by_class: Dict[int, List[np.ndarray]] = {}
+        num_classes: Optional[int] = None
+        for logits, labels in batches:
+            logits = np.asarray(logits)
+            labels = np.asarray(labels, dtype=np.int64)
+            if logits.ndim != 2 or len(logits) != len(labels):
+                raise ValueError("Calibration batches require logits [N, K] and labels [N].")
+            if num_classes is None:
+                num_classes = logits.shape[1]
+                scores_by_class = {k: [] for k in range(num_classes)}
+            elif logits.shape[1] != num_classes:
+                raise ValueError("Calibration batches have inconsistent class dimensions.")
+            if np.any((labels < 0) | (labels >= int(num_classes))):
+                raise ValueError("Calibration labels contain class IDs outside the logit range.")
+            probs = self._softmax(logits)
+            batch_scores = self.compute_nonconformity_scores(probs, labels=labels)
+            for class_id in range(int(num_classes)):
+                class_scores = batch_scores[labels == class_id]
+                if len(class_scores):
+                    scores_by_class[class_id].append(class_scores)
+        if num_classes is None:
+            raise ValueError("Calibration requires at least one non-empty batch.")
+
         self.class_quantiles = {}
 
-        for k in range(num_classes):
-            mask_k = (cal_labels == k)
-            n_k = int(np.sum(mask_k))
+        for k in range(int(num_classes)):
+            scores_k = np.concatenate(scores_by_class[k]) if scores_by_class[k] else np.empty(0)
+            n_k = len(scores_k)
             if n_k == 0:
                 self.class_quantiles[k] = 1.0
                 continue
-
-            # Class-specific calibration non-conformity scores
-            probs_k = cal_probs[mask_k]
-            scores_k = self.compute_nonconformity_scores(probs_k, labels=np.full(n_k, k))
 
             # Finite-sample conformal quantile: ceil((n_k + 1) * (1 - alpha)) / n_k
             q_level = min(1.0, np.ceil((n_k + 1) * (1.0 - self.alpha)) / n_k)
@@ -120,6 +143,58 @@ class MondrianConformalCalibrator:
             self.class_quantiles[k] = quantile_val
 
         self.is_calibrated = True
+
+    def evaluate_batches(
+        self, batches: Iterable[Tuple[np.ndarray, np.ndarray]]
+    ) -> ConformalCalibratorOutput:
+        """Aggregate test coverage and set-size metrics without keeping all sets."""
+        if not self.is_calibrated:
+            raise RuntimeError("Calibrator must be calibrated before evaluation.")
+        class_total = {class_id: 0 for class_id in self.class_quantiles}
+        class_covered = {class_id: 0 for class_id in self.class_quantiles}
+        total = 0
+        covered_total = 0
+        set_size_total = 0
+        singleton_total = 0
+        empty_total = 0
+        for logits, labels in batches:
+            logits = np.asarray(logits)
+            labels = np.asarray(labels, dtype=np.int64)
+            prediction_sets = self.predict(logits)
+            if len(labels) != len(prediction_sets):
+                raise ValueError("Test labels and logits have inconsistent batch lengths.")
+            for index, label in enumerate(labels):
+                label_id = int(label)
+                is_covered = label_id in prediction_sets[index]
+                total += 1
+                covered_total += int(is_covered)
+                if label_id in class_total:
+                    class_total[label_id] += 1
+                    class_covered[label_id] += int(is_covered)
+                size = len(prediction_sets[index])
+                set_size_total += size
+                singleton_total += int(size == 1)
+                empty_total += int(size == 0)
+        if total == 0:
+            raise ValueError("Test evaluation requires at least one sample.")
+        per_class = {
+            class_id: (class_covered[class_id] / class_total[class_id] if class_total[class_id] else 0.0)
+            for class_id in class_total
+        }
+        return ConformalCalibratorOutput(
+            method="mondrian",
+            score_type=self.score_type,
+            alpha=self.alpha,
+            target_coverage=self.target_coverage,
+            class_quantiles=dict(self.class_quantiles),
+            marginal_coverage=covered_total / total,
+            per_class_coverage=per_class,
+            mean_set_size=set_size_total / total,
+            singleton_rate=singleton_total / total,
+            empty_set_rate=empty_total / total,
+            set_sizes=np.empty(0, dtype=np.int32),
+            prediction_sets=[],
+        )
 
     def predict(self, test_logits: np.ndarray) -> List[List[int]]:
         """Construct Mondrian prediction sets for test examples."""

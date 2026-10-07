@@ -15,6 +15,8 @@
 
 PI-WPCT extends **Working-Point Conformal Training (WPCT)** for three-class jet flavour tagging ($b$-jet vs $c$-jet vs light-jet) using the JetClass dataset.
 
+The project's scientific objective remains three-class light/charm/b jet-flavour tagging. **The supplied JetClass ROOT labels inspected so far identify generated processes (QCD, Hbb, Hcc, etc.), not per-jet light/charm/b flavour.** The real-data pipeline therefore requires an explicit target mode. Process classification is supported as a separate task and smoke-test path; it is not presented as flavour tagging. A flavour-tagging conversion fails unless verified per-jet flavour labels are available and configured.
+
 While standard WPCT employs fixed or manually-tuned loss penalty weights for light and charm mistags, **PI-WPCT introduces a periodic, non-differentiable risk-allocation mechanism**. At working-point $w$, the algorithm evaluates the local sensitivity of a downstream analysis proxy (selected $b$-jet purity $P(w)$) to competing background mistags and weights them by their empirical validation variance:
 
 $$R_i(w) = \left[\frac{\partial P}{\partial r_i}\right]^2 \cdot \text{Var}[r_i(w)], \quad i \in \{\text{light}, \text{charm}\}$$
@@ -48,12 +50,16 @@ This preserves the original WPCT loss skeleton, model backbones, exact post-trai
 ```
 pi-wpct/
 ├── configs/                             # Predeclared YAML configs
-│   ├── data.yaml                        # Split fractions, pilot parameters, yields
+│   ├── data.yaml                        # Portable roots, particle cap, pilot parameters
+│   ├── targets/                          # Explicit process/flavour target definitions
 │   ├── backbones/                       # {gbt, pn_lite, lorentznet_small, part}.yaml
 │   ├── regimes/                         # {baseline_ce, ce_temp_scaling, ce_mondrian_cp, conftr, wpct, pi_wpct}.yaml
 │   └── experiment.yaml                  # Seeds, target WPs, K refresh interval
 ├── src/piwpct/
-│   ├── data.py                          # JetClass filtering, tanh(d0)/tanh(dz), canonical splits
+│   ├── data.py                          # Pilot splits, named features, mmap shard loader
+│   ├── schema.py                        # Authoritative 17-feature and raw-storage contract
+│   ├── root_data.py                     # Bounded ROOT/TAR reader and jagged NPY writer
+│   ├── conversion.py                    # Portable prepared manifest and split provenance
 │   ├── metrics.py                       # WP metrics, bootstrap CIs, McNemar, ECE
 │   ├── conformal.py                     # Exact class-conditional Mondrian conformal calibration
 │   ├── losses.py                        # WPCTLoss, PIWPCTLoss, ConfTrLoss, BaselineCELoss
@@ -63,14 +69,16 @@ pi-wpct/
 │   ├── evaluation/                      # Reporting, robustness perturbations, publication plots
 │   └── utils/                           # Seeding, split integrity auditor, trajectory logging
 ├── scripts/
+│   ├── convert_root.py                  # Capped or explicitly guarded full conversion
 │   ├── build_splits.py                  # Generates and hashes canonical 4-way split
 │   ├── run_pretraining_diagnostic.py    # Mandatory pre-training risk diagnostic (§6 & §9.2)
 │   ├── run_regime.py                    # Train and evaluate single regime
 │   └── run_full_ablation_matrix.py      # Run full ablation grid and comparative report
 ├── tests/                               # Comprehensive unit and leakage test suite
 ├── docs/
-│   ├── ARCHITECTURE.md                  # 7-layer architecture and contracts
+│   ├── ARCHITECTURE.md                  # Pipeline architecture and contracts
 │   └── REPRODUCIBILITY.md               # Step-by-step reproduction instructions
+├── hpc/astra/                           # Astra wrapper and submission notes
 └── README.md
 ```
 
@@ -83,7 +91,7 @@ pi-wpct/
 ```bash
 git clone https://github.com/697kiran/pi-wpct-jet-tagging.git
 cd pi-wpct-jet-tagging
-pip install -e .[dev]
+pip install -e ".[dev,training]"
 ```
 
 ### 2. Run Tests
@@ -92,29 +100,60 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-### 3. Generate Canonical Split
+### 3. Generate a Synthetic Pilot Split
 
 ```bash
 python scripts/build_splits.py --pilot --output-dir data/splits --seed 42
 ```
 
+This command creates synthetic pilot examples for lightweight development. It does not read JetClass ROOT files.
+
 ### 4. Run Pre-Training Diagnostic Check
 
 ```bash
-python scripts/run_pretraining_diagnostic.py --config configs/experiment.yaml
+python scripts/run_pretraining_diagnostic.py --pilot --config configs/experiment.yaml
 ```
 
 ### 5. Train and Evaluate PI-WPCT
 
 ```bash
-python scripts/run_regime.py --regime pi_wpct --backbone pn_lite --wp 0.70 --seed 42 --epochs 5
+python scripts/run_regime.py --pilot --regime pi_wpct --backbone pn_lite --wp 0.70 --seed 42 --epochs 5
 ```
 
 ### 6. Run Full Ablation Matrix (WPCT vs PI-WPCT)
 
 ```bash
-python scripts/run_full_ablation_matrix.py --backbone pn_lite --regimes baseline_ce wpct pi_wpct --epochs 3
+python scripts/run_full_ablation_matrix.py --pilot --backbone pn_lite --regimes baseline_ce wpct pi_wpct --epochs 3
 ```
+
+### Synthetic pilot vs real data
+
+All split-building and training/evaluation CLIs require an explicit `--pilot` or `--real-data` choice. `--pilot` means synthetic data only. The diagnostic and ablation tools may generate a missing synthetic manifest only when `--pilot` is supplied. `--real-data` requires an existing prepared manifest marked `is_pilot: false`; it never creates pilot data.
+
+### ROOT conversion and targets
+
+Install the project dependencies, then run a deliberately capped conversion first. Select an empty prepared-data destination outside the raw-data directory:
+
+```bash
+python scripts/convert_root.py --real-data \
+  --raw-data-root /data/JetClass \
+  --prepared-data-root /data/prepared/process-smoke \
+  --target-mode process_classification \
+  --max-files-per-partition 2 --max-jets-per-file 8 \
+  --chunk-size 256 --particle-cap 128
+```
+
+This writes a bounded smoke manifest and jagged NPY shards. Training such a smoke manifest requires the explicit `--allow-incomplete-data` flag. For a full conversion, first use the sample manifest to review its linear size estimate, select a destination with sufficient free space, and then pass `--full --confirm-full-conversion --size-estimate-manifest <sample-manifest>`.
+
+The default `process_classification` target follows the ten explicit JetClass process label branches and is not the project's flavour-tagging objective. `flavour_tagging` requires per-jet `label_light`, `label_charm`, and `label_b` branches (or a valid configured mapping); the currently inspected ROOT files do not expose them, so conversion reports an actionable error. **Do not map `label_QCD` to `light`, or infer flavour from Hbb/Hcc process labels.** WPCT and PI-WPCT are rejected for process-classification targets; use a generic CE regime for that separate task.
+
+The manifest records relative archive/member provenance and file IDs. Conversion stores flat jagged raw particles plus offsets, jet metadata, class IDs and sample IDs; model features and explicit masks are constructed per batch. The single feature schema is [`src/piwpct/schema.py`](src/piwpct/schema.py), with the candidate transformations compared to the [official Particle Transformer JetClass feature configuration](https://github.com/jet-universe/particle_transformer/blob/main/data/JetClass/JetClass_full.yaml).
+
+Portable data roots are resolved in this order: CLI argument, `configs/data.yaml`, environment variable (`RAW_DATA_ROOT`, `PREPARED_DATA_ROOT`, `OUTPUT_ROOT`), then repository-relative default. Conversion requires an explicit prepared destination and refuses to write beneath `RAW_DATA_ROOT`.
+
+### Astra execution
+
+See [`hpc/astra/README.md`](hpc/astra/README.md) for capped conversion, smoke training, and full-run wrappers. The supplied guide documents the Astra Jobs > Shell Script UI and one GPU card; it does not document PBS resource directive syntax or CPU/wall-time values, so resource selection remains in the site UI.
 
 ---
 

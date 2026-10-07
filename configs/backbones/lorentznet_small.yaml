@@ -1,6 +1,24 @@
 # LorentzNet-small configuration
 name: "lorentznet_small"
-n_scalar: 12        # constituent scalar features (excluding 4-vectors)
+n_scalar: 17        # all named scalar features; raw four-vectors remain separate
+scalar_feature_names:
+  - part_deta
+  - part_dphi
+  - part_pt_log
+  - part_e_log
+  - part_d0
+  - part_dz
+  - part_logptrel
+  - part_logerel
+  - part_deltaR
+  - part_charge
+  - part_isChargedHadron
+  - part_isNeutralHadron
+  - part_isPhoton
+  - part_isElectron
+  - part_isMuon
+  - part_d0err
+  - part_dzerr
 n_hidden: 64
 n_layers: 3
 num_classes: 3

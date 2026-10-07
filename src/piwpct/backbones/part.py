@@ -8,7 +8,8 @@ Reference: Qu, Li, Qian, Particle Transformer for Jet Tagging, ICML 2022.
 from typing import Optional
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from piwpct.schema import FEATURE_NAMES
 
 
 class ParticleTransformerBlock(nn.Module):
@@ -59,11 +60,11 @@ class ParticleTransformerBlock(nn.Module):
 
 
 class ParticleTransformer(nn.Module):
-    """Particle Transformer (ParT) model for 3-class jet flavour tagging."""
+    """Particle Transformer model for a configurable jet classification target."""
 
     def __init__(
         self,
-        input_dim: int = 16,
+        input_dim: int = len(FEATURE_NAMES),
         num_classes: int = 3,
         embed_dim: int = 64,
         num_heads: int = 4,

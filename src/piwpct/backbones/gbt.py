@@ -6,7 +6,7 @@ and outputs 3-class logits/scores as PyTorch tensors.
 
 import os
 import pickle
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn

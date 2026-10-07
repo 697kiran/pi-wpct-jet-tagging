@@ -1,13 +1,14 @@
 """Backbone model architectures for jet flavour tagging.
 
 Provides uniform forward interface:
-    forward(features, points=None, mask=None, vectors=None, high_level=None) -> logits [B, 3]
+    forward(features, points=None, mask=None, vectors=None, high_level=None) -> logits [B, K]
 """
 
 from piwpct.backbones.gbt import GBTModel
 from piwpct.backbones.lorentznet_small import LorentzNetSmall
 from piwpct.backbones.part import ParticleTransformer
 from piwpct.backbones.particlenet_lite import ParticleNetLite
+from piwpct.schema import FEATURE_NAMES
 
 
 def build_backbone(backbone_name: str, config: dict):
@@ -15,7 +16,7 @@ def build_backbone(backbone_name: str, config: dict):
     name = backbone_name.lower().replace("-", "_")
     if name in {"pn_lite", "particlenet_lite"}:
         return ParticleNetLite(
-            input_dim=config.get("input_dim", 16),
+            input_dim=config.get("input_dim", len(FEATURE_NAMES)),
             num_classes=config.get("num_classes", 3),
             k_neighbors=config.get("k_neighbors", 8),
             conv_params=config.get("conv_params", [[32, 32], [64, 64]]),
@@ -23,7 +24,8 @@ def build_backbone(backbone_name: str, config: dict):
         )
     elif name in {"lorentznet", "lorentznet_small"}:
         return LorentzNetSmall(
-            n_scalar=config.get("n_scalar", 12),
+            n_scalar=config.get("n_scalar", len(FEATURE_NAMES)),
+            scalar_feature_names=config.get("scalar_feature_names", list(FEATURE_NAMES)),
             n_hidden=config.get("n_hidden", 64),
             n_layers=config.get("n_layers", 3),
             num_classes=config.get("num_classes", 3),
@@ -31,7 +33,7 @@ def build_backbone(backbone_name: str, config: dict):
         )
     elif name in {"part", "particle_transformer"}:
         return ParticleTransformer(
-            input_dim=config.get("input_dim", 16),
+            input_dim=config.get("input_dim", len(FEATURE_NAMES)),
             num_classes=config.get("num_classes", 3),
             embed_dim=config.get("embed_dim", 64),
             num_heads=config.get("num_heads", 4),

@@ -1,6 +1,6 @@
 # Particle Transformer (ParT) configuration
 name: "part"
-input_dim: 16
+input_dim: 17
 num_classes: 3
 embed_dim: 64
 num_heads: 4

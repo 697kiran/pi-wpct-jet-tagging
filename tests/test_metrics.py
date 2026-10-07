@@ -1,11 +1,8 @@
 """Tests for statistical metrics, calibration ECE, bootstrap CIs, and McNemar test."""
 
 import numpy as np
-import pytest
 
 from piwpct.metrics import (
-    compute_bootstrap_ci,
-    compute_classification_metrics,
     compute_ece,
     compute_working_point_metrics,
     mcnemar_test,
@@ -54,8 +51,8 @@ def test_paired_bootstrap_and_mcnemar():
     for i in range(200):
         logits_b[i, labels[i]] += 1.5
 
-    def _metric_fn(l, y):
-        return compute_working_point_metrics(l, y, target_wp=0.70)
+    def _metric_fn(logits, labels):
+        return compute_working_point_metrics(logits, labels, target_wp=0.70)
 
     comp = paired_bootstrap_comparison(logits_a, logits_b, labels, _metric_fn, n_bootstraps=100, seed=42)
     assert "rej_light" in comp

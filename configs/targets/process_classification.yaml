@@ -1,0 +1,14 @@
+target:
+  mode: process_classification
+  semantics: "JetClass generated-process classification; not jet-flavour tagging."
+  classes:
+    - {name: QCD, branch: label_QCD}
+    - {name: Hbb, branch: label_Hbb}
+    - {name: Hcc, branch: label_Hcc}
+    - {name: Hgg, branch: label_Hgg}
+    - {name: H4q, branch: label_H4q}
+    - {name: Hqql, branch: label_Hqql}
+    - {name: Zqq, branch: label_Zqq}
+    - {name: Wqq, branch: label_Wqq}
+    - {name: Tbqq, branch: label_Tbqq}
+    - {name: Tbl, branch: label_Tbl}
