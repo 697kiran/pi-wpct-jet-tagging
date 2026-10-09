@@ -1,0 +1,27 @@
+{
+  "schema": "piwpct.astra_transfer_plan.v1",
+  "project_root": "/home/<username>/pi-wpct-jet-tagging",
+  "transfer_rule_source": "Astra_User_Guide.pdf, section 6",
+  "groups": [
+    {
+      "kind": "repository",
+      "source": "<local repository root>",
+      "destination": "/home/<username>/pi-wpct-jet-tagging/",
+      "exclude": [".git", "data/raw", "data/prepared", "outputs", "caches"],
+      "method": "direct upload for files under 5 GB"
+    },
+    {
+      "kind": "raw_process_archives",
+      "source_root": "<local JetClass archive directory>",
+      "destination": "/home/<username>/pi-wpct-jet-tagging/data/raw/jetclass-process/",
+      "method": "Astra upload interface for each file under 5 GB; ICTS external-drive procedure for each file over 5 GB",
+      "files": []
+    },
+    {
+      "kind": "prepared_process_smoke",
+      "source": "<local prepared smoke dataset directory>",
+      "destination": "/home/<username>/pi-wpct-jet-tagging/data/prepared/process/smoke-72/",
+      "method": "direct upload if total transfer item is under 5 GB; preserve manifest and shards together"
+    }
+  ]
+}

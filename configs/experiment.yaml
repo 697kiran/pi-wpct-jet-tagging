@@ -34,8 +34,5 @@ experiment:
       ip_smear_sigmas: [0.0, 0.02, 0.05, 0.10]
       track_drop_rates: [0.0, 0.05, 0.10, 0.15]
 
-  # Logging and outputs
-  output_dir: "outputs"
-  checkpoint_dir: "checkpoints"
-  plots_dir: "plots"
-  logs_dir: "logs"
+# Output paths are controlled by --output-root / configs/data.yaml / OUTPUT_ROOT.
+# Training and experiment scripts create isolated run directories beneath that base.

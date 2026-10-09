@@ -10,12 +10,13 @@ import os
 from bisect import bisect_right
 from collections import OrderedDict
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
+from piwpct.data_paths import PROJECT_ROOT
 from piwpct.utils.split_integrity import SplitAuditor, check_splits_disjoint
 from piwpct.schema import (
     FEATURE_NAMES,
@@ -295,7 +296,8 @@ def create_canonical_splits(
         }
         filepath = os.path.join(output_dir, f"{split_name}.npz")
         np.savez_compressed(filepath, **split_data)
-        files_saved[split_name] = filepath
+        # Paths in the manifest are relative to the manifest, not the process CWD.
+        files_saved[split_name] = Path(filepath).name
         array_hashes[split_name] = SplitAuditor.compute_sha256(filepath)
 
     # Build manifest
@@ -549,6 +551,53 @@ def collate_prepared_jets(
     }
 
 
+def _resolve_pilot_file(manifest_path: str, manifest: Dict[str, Any], split_name: str) -> str:
+    """Find a pilot NPZ beside its manifest, retaining checked legacy references."""
+    reference = manifest.get("files", {}).get(split_name)
+    if not isinstance(reference, str) or not reference:
+        raise ValueError(f"Pilot manifest {manifest_path} has no file reference for {split_name!r}.")
+    native = Path(reference).expanduser()
+    if PureWindowsPath(reference).is_absolute() and not native.is_absolute():
+        raise ValueError(
+            f"Pilot split {split_name!r} uses a Windows absolute path that is unavailable here: {reference!r}."
+        )
+    normalized = Path(reference.replace("\\", "/"))
+    manifest_dir = Path(manifest_path).resolve().parent
+    if native.is_absolute():
+        candidates = [native.resolve()]
+    else:
+        candidates = [manifest_dir / normalized]
+        if len(normalized.parts) > 1:
+            # Older manifests stored paths relative to the launch CWD. A file
+            # moved beside the manifest is accepted only when its hash matches.
+            candidates.extend((manifest_dir / normalized.name, PROJECT_ROOT / normalized))
+    existing = list(dict.fromkeys(path.resolve() for path in candidates if path.is_file()))
+    if not existing:
+        raise FileNotFoundError(
+            f"Missing pilot split {split_name!r} NPZ {reference!r} referenced by {manifest_path}; "
+            f"checked: {', '.join(map(str, candidates))}. No data was generated."
+        )
+    expected_hash = manifest.get("sha256_checksums", {}).get(split_name)
+    if not expected_hash and not native.is_absolute() and len(normalized.parts) > 1 and candidates[0].resolve() not in existing:
+        raise ValueError(
+            f"Pilot split {split_name!r} in {manifest_path} uses a legacy CWD-relative path "
+            "but has no SHA-256 checksum to verify a fallback file."
+        )
+    if expected_hash:
+        matching = [path for path in existing if SplitAuditor.compute_sha256(str(path)) == expected_hash]
+        if not matching:
+            raise ValueError(
+                f"Pilot split {split_name!r} referenced by {manifest_path} exists, "
+                "but no candidate matches its recorded SHA-256 checksum."
+            )
+        return str(matching[0])
+    if len(existing) > 1:
+        raise ValueError(
+            f"Pilot split {split_name!r} in {manifest_path} has ambiguous legacy paths and no checksum."
+        )
+    return str(existing[0])
+
+
 def get_dataloaders(
     manifest_path: str,
     batch_size: int = 256,
@@ -586,7 +635,7 @@ def get_dataloaders(
             dataset = PreparedShardedJetDataset(manifest_path, split_name)
             collate_fn = partial(collate_prepared_jets, particle_cap=cap)
         else:
-            filepath = manifest["files"][split_name]
+            filepath = _resolve_pilot_file(manifest_path, manifest, split_name)
             dataset = JetDataset(filepath, split_name=split_name, auditor=auditor)
             target_definition = manifest.get("target_definition", {})
             dataset.target_mode = target_definition.get("mode", "flavour_tagging")

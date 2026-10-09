@@ -1,6 +1,7 @@
 """Tests for data generation, impact parameter transforms, and canonical splits."""
 
 import os
+from pathlib import Path
 import numpy as np
 
 from piwpct.data import create_canonical_splits, generate_pilot_dataset, transform_impact_parameters
@@ -59,7 +60,8 @@ def test_canonical_splits_creation_and_disjointness(tmp_path):
 
     # Verify that files exist and hashes are valid SHA-256 strings
     for split_name in ["train", "validation", "calibration", "test"]:
-        fpath = manifest["files"][split_name]
+        assert manifest["files"][split_name] == f"{split_name}.npz"
+        fpath = str(Path(out_dir) / manifest["files"][split_name])
         assert os.path.exists(fpath)
         sha = manifest["sha256_checksums"][split_name]
         assert len(sha) == 64

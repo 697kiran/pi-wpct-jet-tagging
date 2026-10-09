@@ -3,7 +3,7 @@
 
 import pytest
 
-from piwpct.data_paths import DEFAULT_ROOTS, ensure_path_outside_raw, resolve_data_root
+from piwpct.data_paths import PROJECT_ROOT, DEFAULT_ROOTS, ensure_path_outside_raw, resolve_data_root
 
 
 def test_path_precedence_is_cli_then_config_then_environment_then_default(tmp_path):
@@ -16,7 +16,7 @@ def test_path_precedence_is_cli_then_config_then_environment_then_default(tmp_pa
     assert resolve_data_root("prepared_data_root", str(cli_path), config, environ=environ) == (cli_path.resolve(), "cli")
     assert resolve_data_root("prepared_data_root", None, config, environ=environ) == (config_path.resolve(), "config")
     assert resolve_data_root("prepared_data_root", None, {}, environ=environ) == (env_path.resolve(), "environment")
-    assert resolve_data_root("prepared_data_root", None, {}, environ={}) == (DEFAULT_ROOTS["prepared_data_root"].resolve(), "default")
+    assert resolve_data_root("prepared_data_root", None, {}, environ={}) == ((PROJECT_ROOT / DEFAULT_ROOTS["prepared_data_root"]).resolve(), "default")
 
 
 def test_output_root_cannot_be_nested_under_raw_dataset(tmp_path):

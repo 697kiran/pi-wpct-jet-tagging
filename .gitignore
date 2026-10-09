@@ -27,6 +27,10 @@ env/
 venv/
 ENV/
 
+# Per-account Astra deployment paths; commit only the sanitized example.
+run_on_astra/job_config.json
+data/transfer_manifest.local.json
+
 # Testing & Coverage
 .pytest_cache/
 .coverage
@@ -48,6 +52,7 @@ data/splits/*.npz
 *.staging/
 *.log
 outputs/**/*.jsonl
+outputs/runs/
 outputs/**/*.csv
 outputs/**/checkpoint*.pt
 outputs/**/checkpoint*.ckpt

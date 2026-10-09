@@ -1,0 +1,32 @@
+{
+  "enabled": false,
+  "project_root": null,
+  "python": null,
+  "stage": null,
+  "data_mode": null,
+  "target_mode": null,
+  "raw_data_root": null,
+  "prepared_data_root": null,
+  "output_root": null,
+  "split_manifest": null,
+  "target_config": null,
+  "size_estimate_manifest": null,
+  "confirm_full_conversion": false,
+  "working_point": 0.7,
+  "seed": 42,
+  "run_id": null,
+  "regime": null,
+  "backbone": "pn_lite",
+  "epochs": 10,
+  "workers": 2,
+  "batch_size": 64,
+  "particle_cap": 128,
+  "pin_memory": false,
+  "conversion": {
+    "max_files_per_partition": 2,
+    "max_jets_per_file": 8,
+    "chunk_size": 256,
+    "calibration_fraction": 0.1,
+    "particle_cap": 128
+  }
+}

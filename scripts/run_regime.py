@@ -21,11 +21,12 @@ from piwpct.cli_data import (
     ensure_split_manifest,
 )
 from piwpct.data import get_dataloaders
-from piwpct.data_paths import load_data_config, resolve_data_root
+from piwpct.data_paths import PROJECT_ROOT, load_data_config, resolve_data_root, resolve_project_path
 from piwpct.evaluation.plots import plot_conformal_coverage, plot_lambda_trajectories, plot_robustness_curves
 from piwpct.evaluation.robustness import evaluate_robustness_grid, evaluate_robustness_loader
 from piwpct.metrics import compute_classification_metrics, compute_ece, compute_working_point_metrics
 from piwpct.train import scale_calibration_and_test_logits, train_pipeline
+from piwpct.utils.run_directory import update_run_metadata, write_run_json
 from piwpct.utils.seeding import seed_everything
 
 
@@ -44,7 +45,8 @@ def main():
     parser.add_argument("--split-manifest", type=str, default=None, help="Prepared/pilot split manifest path")
     parser.add_argument("--prepared-data-root", type=str, default=None, help="Prepared shard root (real-data mode)")
     parser.add_argument("--output-root", "--output-dir", dest="output_root", default=None,
-                        help="Root directory for checkpoints, logs and reports")
+                        help="Base output root; each execution creates a unique runs/<run-id> directory")
+    parser.add_argument("--run-id", default=None, help="Optional explicit run ID; existing IDs are refused")
     parser.add_argument("--workers", type=int, default=None, help="DataLoader workers (configurable; default 0)")
     parser.add_argument("--pin-memory", action="store_true", help="Pin batches for accelerator transfer")
     parser.add_argument("--particle-cap", type=int, default=None, help="Batch-time particle cap (default 128)")
@@ -59,7 +61,7 @@ def main():
         parser.error("--real-data requires an explicit --target-mode matching the prepared manifest.")
 
     # Load configurations
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    base_dir = str(PROJECT_ROOT)
     with open(os.path.join(base_dir, "configs", "experiment.yaml")) as f:
         exp_cfg = yaml.safe_load(f)
     data_cfg = load_data_config(os.path.join(base_dir, "configs", "data.yaml"))
@@ -82,10 +84,10 @@ def main():
     # Dataloaders
     prepared_root, _ = resolve_data_root("prepared_data_root", args.prepared_data_root, data_cfg)
     output_root, _ = resolve_data_root("output_root", args.output_root, data_cfg)
-    manifest_path = args.split_manifest or (
+    manifest_path = str(resolve_project_path(args.split_manifest)) if args.split_manifest else (
         str(Path(prepared_root) / "canonical_split_manifest.json")
         if args.data_mode == "real"
-        else "data/splits/canonical_split_manifest.json"
+        else str(resolve_project_path("data/splits/canonical_split_manifest.json"))
     )
     try:
         manifest = ensure_split_manifest(manifest_path, data_mode=args.data_mode)
@@ -128,15 +130,22 @@ def main():
         target_wp=args.wp,
         seed=args.seed,
         output_dir=str(output_root),
+        run_id=args.run_id,
+        run_metadata={
+            "dataset_mode": args.data_mode,
+            "dataset_identifier": manifest.get("dataset_name", Path(manifest_path).stem),
+            "target_mode": target_mode,
+        },
     )
 
     model = train_results["model"]
     run_dir = train_results["run_dir"]
+    plots_dir = os.path.join(run_dir, "plots")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Plot lambda trajectories if PI-WPCT
     if args.regime == "pi_wpct" and train_results.get("trajectories"):
-        traj_plot = os.path.join(run_dir, "lambda_trajectories.png")
+        traj_plot = os.path.join(plots_dir, "lambda_trajectories.png")
         plot_lambda_trajectories(train_results["trajectories"], traj_plot)
 
     # Helper function to get model logits on a dataset
@@ -180,6 +189,7 @@ def main():
     print(f"ECE:                        {ece_val:.4f}")
     print(f"Target definition:          {target_mode} ({', '.join(class_names)})")
     wp_metrics = None
+    robustness_data = None
     if target_mode == "flavour_tagging":
         wp_metrics = compute_working_point_metrics(test_logits, test_labels, target_wp=args.wp)
         print(f"Target b-efficiency (w):    {args.wp*100:.1f}%")
@@ -193,7 +203,7 @@ def main():
     print("=" * 55 + "\n")
 
     # Plot conformal coverage
-    cov_plot = os.path.join(run_dir, "conformal_coverage.png")
+    cov_plot = os.path.join(plots_dir, "conformal_coverage.png")
     plot_conformal_coverage(
         conformal_out.per_class_coverage,
         target_coverage=0.90,
@@ -223,11 +233,62 @@ def main():
                 device=device,
                 temperature=temperature,
             )
-        rob_plot = os.path.join(run_dir, "robustness_curves.png")
+        rob_plot = os.path.join(plots_dir, "robustness_curves.png")
         plot_robustness_curves(robustness_data, save_path=rob_plot)
         print(f"[+] Robustness analysis complete. Plots saved to: {rob_plot}")
     else:
         print("[!] Flavour-specific detector robustness metrics are not applied to process classes.")
+
+    scalar_classification = {
+        key: float(value) for key, value in cls_metrics.items()
+        if key in {"accuracy", "macro_auc"}
+    }
+    final_metrics = {
+        "schema": "piwpct.final_metrics.v1",
+        "run_id": train_results["run_id"],
+        "dataset_identifier": manifest.get("dataset_name", Path(manifest_path).stem),
+        "dataset_mode": args.data_mode,
+        "target_mode": target_mode,
+        "regime": args.regime,
+        "backbone": args.backbone,
+        "target_wp": args.wp,
+        "seed": args.seed,
+        "classification": {**scalar_classification, "ece": float(ece_val)},
+        "working_point": wp_metrics,
+        "conformal": {
+            "method": conformal_out.method,
+            "score_type": conformal_out.score_type,
+            "alpha": conformal_out.alpha,
+            "target_coverage": conformal_out.target_coverage,
+            "marginal_coverage": conformal_out.marginal_coverage,
+            "per_class_coverage": conformal_out.per_class_coverage,
+            "mean_set_size": conformal_out.mean_set_size,
+            "singleton_rate": conformal_out.singleton_rate,
+            "empty_set_rate": conformal_out.empty_set_rate,
+        },
+        "robustness": robustness_data,
+    }
+    metrics_path = write_run_json(run_dir, "metrics/final_metrics.json", final_metrics)
+    calibration = {
+        "schema": "piwpct.conformal_calibration.v1",
+        "run_id": train_results["run_id"],
+        "method": "mondrian",
+        "score_type": calibrator.score_type,
+        "alpha": calibrator.alpha,
+        "class_names": class_names,
+        "class_quantiles": {str(key): float(value) for key, value in calibrator.class_quantiles.items()},
+        "calibration_count_by_class": {
+            str(index): int(np.sum(cal_labels == index)) for index in range(len(class_names))
+        },
+        "temperature": temperature,
+    }
+    calibration_path = write_run_json(run_dir, "metrics/conformal_calibration.json", calibration)
+    update_run_metadata(
+        run_dir,
+        status="completed",
+        final_metrics_path=str(metrics_path),
+        conformal_calibration_path=str(calibration_path),
+    )
 
 
 if __name__ == "__main__":

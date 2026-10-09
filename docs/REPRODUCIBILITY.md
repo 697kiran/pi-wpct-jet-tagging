@@ -6,19 +6,21 @@ This guide provides step-by-step instructions to reproduce all experiments, data
 
 ## 1. Environment Setup
 
-Clone the repository and install the package in editable mode with development dependencies:
+For local development, clone the repository and install the package in editable mode with development and generic training dependencies:
 
 ```bash
 git clone https://github.com/697kiran/pi-wpct-jet-tagging.git
 cd pi-wpct-jet-tagging
 
-# Create and activate a virtual environment (Python 3.8 - 3.11 recommended)
+# Create and activate a virtual environment with a Python version supported by the selected dependencies
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install package dependencies
-pip install -e .[dev]
+python -m pip install -e ".[dev,training]"
 ```
+
+The local `training` extra does not select an Astra CUDA build. Use the separate Astra recipe in `hpc/astra/README.md` when preparing that system. XGBoost/LightGBM are available through `.[gbt]`; the optional FastAPI prototype uses `.[api]`.
 
 Verify the installation and run the test suite. Tests use tiny generated fixtures and do not read the supplied raw dataset:
 ```bash
@@ -60,9 +62,7 @@ python scripts/run_pretraining_diagnostic.py --pilot --config configs/experiment
 
 The `--pilot` flag is required to select synthetic data. If its manifest is missing, this explicit mode creates the synthetic pilot split. Real-data mode (`--real-data`) only accepts an existing prepared manifest marked `is_pilot: false` and never falls back to synthetic data. PI-WPCT diagnostics require verified light/charm/b labels; JetClass process labels cannot be used for that diagnostic.
 
-Outputs:
-- Terminal diagnostic table of mistag rates, risks, and lambda allocations.
-- Allocation curve plot: `plots/pretraining_risk_diagnostic.png`.
+The diagnostic table remains on the console. Each execution also gets a unique `outputs/runs/<run-id>/` directory with results in `metrics/diagnostic_results.json` and the risk-curve figure in `plots/risk_curves.png`.
 - Automated test of the flat-risk null-result criterion (§9.3).
 
 ---
@@ -83,12 +83,7 @@ Supported regimes:
 - `wpct`: Working-Point Conformal Training with static background loss weights.
 - `pi_wpct`: WPCT with periodic validation physics-impact risk allocation.
 
-Outputs created under `outputs/pi_wpct_pn_lite_wp70_seed42/`:
-- `checkpoint.pt`: Checkpoint with model weights, full config, git commit hash, seed, and split hash.
-- `trajectories.jsonl`: JSON Lines log of validation risk refresh events.
-- `lambda_trajectories.png`: Dynamic weight and purity evolution curves.
-- `conformal_coverage.png`: Class-conditional Mondrian coverage plot.
-- `robustness_curves.png`: Performance degradation curves under detector mismodellings.
+Each execution receives a unique `outputs/runs/<run-id>/` directory. Checkpoints are in `checkpoints/`, PI-WPCT refreshes in `trajectories/trajectories.jsonl`, metrics and calibration records in `metrics/`, figures in `plots/`, and the application log in `logs/application.log`. Run metadata is in `metadata.json`.
 
 ---
 
@@ -100,9 +95,7 @@ To run the complete benchmark comparison between regimes (e.g. `baseline_ce`, `w
 python scripts/run_full_ablation_matrix.py --pilot --backbone pn_lite --regimes baseline_ce wpct pi_wpct --epochs 3
 ```
 
-Outputs generated under `outputs/reports/`:
-- `ablation_summary_report.md`: Markdown summary table with paired bootstrap CIs and automated failure/null-result flags.
-- `ablation_summary_report.json`: Machine-readable structured metric data.
+The ablation creates one suite directory under `outputs/runs/<suite-id>/`; each child regime run has its own directory. Aggregate Markdown/JSON reports are written under that suite's `reports/` directory.
 
 ---
 
@@ -150,10 +143,10 @@ python scripts/run_regime.py --real-data \
 
 The authoritative 17-channel candidate feature ordering and transformations are in `src/piwpct/schema.py`; four-vectors and the mask remain separate model inputs. The transforms were checked against the [official Particle Transformer JetClass feature configuration](https://github.com/jet-universe/particle_transformer/blob/main/data/JetClass/JetClass_full.yaml). Calibration and test logits receive the same fitted temperature before conformal scores are computed.
 
-Portable roots resolve as CLI argument, config value, environment variable, then repository-relative default. Environment names are `RAW_DATA_ROOT`, `PREPARED_DATA_ROOT`, and `OUTPUT_ROOT`.
+Portable roots resolve as CLI argument, config value, environment variable, then repository-relative default. Environment names are `RAW_DATA_ROOT`, `PREPARED_DATA_ROOT`, and `OUTPUT_ROOT`. Output roots are base directories; scripts create run-specific directories beneath `runs/`. See [`EXPERIMENT_OUTPUTS.md`](EXPERIMENT_OUTPUTS.md) for the full output contract and collision behavior.
 
 ---
 
 ## 8. Astra
 
-Use `hpc/astra/run_stage.py` through the documented **Jobs > Shell Script** interface. The wrapper supports capped conversion, smoke training, full conversion, and full training. Select one GPU card in Astra's UI for the initial training run. The supplied guide does not specify PBS directive syntax, CPU allocation syntax, or a wall-time value; select supported resources in the site UI rather than adding guessed directives. See `hpc/astra/README.md` for the tested Torch/CUDA installation order and wrapper commands.
+`run_on_astra/submit_stage.py` is the no-argument GUI entry point and reads `run_on_astra/job_config.json`; the disabled example is `run_on_astra/job_config.example.json`. It launches `hpc/astra/run_stage.py`, which invokes the existing conversion or single-regime training script. Complete and review the config before enabling it. Astra's UI selects site resources; this repository does not assume portable PBS directives. See `hpc/astra/README.md` for stages, data-mode checks, and environment setup. No Astra job has been run.

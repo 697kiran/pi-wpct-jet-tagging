@@ -1,0 +1,3 @@
+# Non-PyTorch scientific installation. pyproject.toml owns dependency versions.
+# Run from the repository root; install the verified CUDA PyTorch wheel separately.
+-e .

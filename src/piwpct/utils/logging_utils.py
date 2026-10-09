@@ -3,6 +3,7 @@
 import datetime
 import json
 import logging
+import math
 import os
 import subprocess
 from typing import Any, Dict, List, Optional
@@ -26,8 +27,9 @@ def setup_logger(name: str = "piwpct", log_file: Optional[str] = None, level: in
     logger.propagate = False
 
     # Clear existing handlers
-    if logger.hasHandlers():
-        logger.handlers.clear()
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
 
     formatter = logging.Formatter(
         "[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
@@ -40,7 +42,7 @@ def setup_logger(name: str = "piwpct", log_file: Optional[str] = None, level: in
 
     if log_file:
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
+        file_handler = logging.FileHandler(log_file, mode="x", encoding="utf-8")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
@@ -50,9 +52,13 @@ def setup_logger(name: str = "piwpct", log_file: Optional[str] = None, level: in
 class TrajectoryLogger:
     """Logs risk refresh events and intermediate optimization variables to JSON Lines."""
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, run_id: Optional[str] = None):
         self.log_path = log_path
+        self.run_id = run_id
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        # Exclusive creation prevents an accidental append into another execution's log.
+        with open(self.log_path, "x", encoding="utf-8"):
+            pass
         self.events: List[Dict[str, Any]] = []
 
     def log_event(self, event_type: str, data: Dict[str, Any]) -> None:
@@ -60,11 +66,13 @@ class TrajectoryLogger:
         record = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "event_type": event_type,
+            **({"run_id": self.run_id} if self.run_id else {}),
             **data,
         }
         self.events.append(record)
-        with open(self.log_path, "a") as f:
+        with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
+            f.flush()
 
     def log_refresh(
         self,
@@ -122,3 +130,32 @@ class TrajectoryLogger:
                     if k in rec:
                         trajectories[k].append(rec[k])
         return trajectories
+
+
+class EpochMetricsLogger:
+    """Write one flushed validation-metrics record per epoch in a fresh run."""
+
+    def __init__(self, log_path: str, run_id: str):
+        self.log_path = log_path
+        self.run_id = run_id
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(self.log_path, "x", encoding="utf-8"):
+            pass
+
+    def log_epoch(self, epoch: int, train_metrics: Dict[str, float], val_metrics: Dict[str, float]) -> None:
+        record = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "run_id": self.run_id,
+            "epoch": int(epoch),
+            "train_metrics": {
+                key: (float(value) if math.isfinite(float(value)) else None)
+                for key, value in train_metrics.items()
+            },
+            "validation_metrics": {
+                key: (float(value) if math.isfinite(float(value)) else None)
+                for key, value in val_metrics.items()
+            },
+        }
+        with open(self.log_path, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, allow_nan=False) + "\n")
+            stream.flush()

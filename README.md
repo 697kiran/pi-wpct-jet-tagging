@@ -84,15 +84,21 @@ pi-wpct/
 
 ---
 
+## Experiment outputs
+
+Each new execution receives an isolated `outputs/runs/<run-id>/` directory. Checkpoints, risk trajectories, metrics, plots, application logs, and effective run metadata are stored beneath that directory. See [`docs/EXPERIMENT_OUTPUTS.md`](docs/EXPERIMENT_OUTPUTS.md) for run-ID collisions, the Astra path flow, and legacy output compatibility.
+
 ## Quickstart
 
-### 1. Installation
+### 1. Local development installation
 
 ```bash
 git clone https://github.com/697kiran/pi-wpct-jet-tagging.git
 cd pi-wpct-jet-tagging
-pip install -e ".[dev,training]"
+python -m pip install -e ".[dev,training]"
 ```
+
+This local-development extra may install a generic PyTorch build. For Astra, use the separate CUDA installation sequence in [`hpc/astra/README.md`](hpc/astra/README.md). The default package includes conversion and evaluation libraries; `.[gbt]` adds XGBoost/LightGBM, and `.[api]` adds the optional FastAPI prototype's web dependencies. Both optional components also use Torch from the chosen environment. The `ui/` frontend uses its own Node dependencies.
 
 ### 2. Run Tests
 
@@ -107,6 +113,10 @@ python scripts/build_splits.py --pilot --output-dir data/splits --seed 42
 ```
 
 This command creates synthetic pilot examples for lightweight development. It does not read JetClass ROOT files.
+
+The tracked `data/splits/canonical_split_manifest.json` is an incomplete older pilot artifact: its four referenced NPZ files are absent. Do not transfer or use that manifest alone as a dataset. An explicit pilot split build may replace it when pilot data is actually needed. Newly built pilot manifests refer to NPZ files relative to the manifest, so the complete split directory can be relocated together.
+
+Relative CLI paths and data-root values from YAML or environment variables are resolved from the repository root, independently of the shell's current directory. Absolute paths remain absolute. Raw and prepared roots can point to separate locations outside the repository.
 
 ### 4. Run Pre-Training Diagnostic Check
 
@@ -153,7 +163,7 @@ Portable data roots are resolved in this order: CLI argument, `configs/data.yaml
 
 ### Astra execution
 
-See [`hpc/astra/README.md`](hpc/astra/README.md) for capped conversion, smoke training, and full-run wrappers. The supplied guide documents the Astra Jobs > Shell Script UI and one GPU card; it does not document PBS resource directive syntax or CPU/wall-time values, so resource selection remains in the site UI.
+See [`hpc/astra/README.md`](hpc/astra/README.md) for the intended project-local environment and CUDA PyTorch setup. After completing the deployment config and Astra checks, select [`run_on_astra/submit_stage.py`](run_on_astra/submit_stage.py) through the Astra GUI; it invokes the existing `hpc/astra/run_stage.py` orchestrator. No Astra setup or job has been performed.
 
 ---
 

@@ -16,6 +16,7 @@ from piwpct.cli_data import (
     add_data_mode_arguments,
     ensure_pilot_output_is_safe,
 )
+from piwpct.data_paths import resolve_project_path
 
 
 def main():
@@ -34,8 +35,9 @@ def main():
             "--real-data with an explicit --target-mode to prepare real ROOT data."
         )
 
+    output_dir = str(resolve_project_path(args.output_dir))
     try:
-        ensure_pilot_output_is_safe(args.output_dir)
+        ensure_pilot_output_is_safe(output_dir)
     except SplitManifestError as exc:
         parser.error(str(exc))
 
@@ -44,20 +46,20 @@ def main():
     from piwpct.utils.seeding import seed_everything
 
     seed_everything(args.seed)
-    print(f"[*] Building SYNTHETIC pilot splits in '{args.output_dir}' (seed={args.seed})...")
+    print(f"[*] Building SYNTHETIC pilot splits in '{output_dir}' (seed={args.seed})...")
 
     print("[!] Generating synthetic pilot data with provisional light:b:c ratio (~4:1:1)...")
     data = generate_pilot_dataset(n_samples=args.n_samples, seed=args.seed)
 
     manifest = create_canonical_splits(
         data=data,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         fractions=(0.60, 0.15, 0.10, 0.15),
         seed=args.seed,
         is_pilot=True,
     )
 
-    manifest_path = os.path.join(args.output_dir, "canonical_split_manifest.json")
+    manifest_path = os.path.join(output_dir, "canonical_split_manifest.json")
     print("[+] Successfully built canonical splits!")
     print(f"[+] Manifest path: {manifest_path}")
     print(f"[+] Sample counts: {manifest['counts']}")

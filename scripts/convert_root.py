@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from piwpct.conversion import ConversionError, convert_jetclass_archives
-from piwpct.data_paths import load_data_config, resolve_data_root
+from piwpct.data_paths import load_data_config, resolve_data_root, resolve_project_path
 from piwpct.root_data import RootDataError
 from piwpct.schema import PARTICLE_CAP_DEFAULT
 
@@ -67,7 +67,7 @@ def main() -> None:
             raw_data_root=raw_root,
             prepared_data_root=prepared_root,
             target_mode=args.target_mode,
-            target_config=args.target_config,
+            target_config=str(resolve_project_path(args.target_config)) if args.target_config else None,
             chunk_size=args.chunk_size,
             particle_cap=args.particle_cap,
             calibration_fraction=args.calibration_fraction,
@@ -77,7 +77,7 @@ def main() -> None:
             malformed_policy=args.malformed_policy,
             max_malformed_fraction=args.max_malformed_fraction,
             full_conversion=args.full,
-            size_estimate_manifest=args.size_estimate_manifest,
+            size_estimate_manifest=resolve_project_path(args.size_estimate_manifest) if args.size_estimate_manifest else None,
             confirm_full_conversion=args.confirm_full_conversion,
         )
     except (ValueError, RootDataError, ConversionError) as exc:

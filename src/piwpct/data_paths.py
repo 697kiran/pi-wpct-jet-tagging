@@ -1,10 +1,19 @@
-"""Portable data/output roots with CLI -> config -> environment precedence."""
+"""Project-anchored paths with CLI -> config -> environment precedence."""
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 import yaml
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def resolve_project_path(value: Union[str, Path], *, project_root: Path = PROJECT_ROOT) -> Path:
+    """Resolve an absolute path unchanged, or a relative path from the project root."""
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else project_root / path).resolve()
 
 
 DEFAULT_ROOTS = {
@@ -22,7 +31,7 @@ ENV_NAMES = {
 def load_data_config(path: Optional[str]) -> Dict[str, Any]:
     if path is None:
         return {}
-    config_path = Path(path)
+    config_path = resolve_project_path(path)
     try:
         value = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except OSError as exc:
@@ -54,7 +63,7 @@ def resolve_data_root(
             value, source = env_value, "environment"
         else:
             value, source = str(DEFAULT_ROOTS[name]), "default"
-    return Path(value).expanduser().resolve(), source
+    return resolve_project_path(value), source
 
 
 def ensure_path_outside_raw(path: Path, raw_data_root: Path, *, name: str) -> None:

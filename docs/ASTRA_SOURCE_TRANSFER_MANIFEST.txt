@@ -1,0 +1,13 @@
+Superseded local inventory
+=========================
+
+The Phase 6.1 source package is generated from the current working tree with:
+
+    python scripts/package_astra_source.py
+
+The authoritative per-file SHA-256 inventory is emitted at
+`dist/astra/source_manifest.json`; the final ZIP checksum is emitted at
+`dist/astra/pi-wpct-jet-tagging-source.zip.sha256`. These are local ignored
+release artifacts and are deliberately not committed or included inside the ZIP.
+This earlier Phase 6 file list is retained only as a pointer; do not use its
+previous inventory or ZIP checksum as the current release record.

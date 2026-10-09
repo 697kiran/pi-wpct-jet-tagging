@@ -21,7 +21,12 @@ from piwpct.backbones import build_backbone
 from piwpct.backbones.gbt import GBTModel
 from piwpct.losses import BaselineCELoss, ConfTrLoss, PIWPCTLoss, WPCTLoss
 from piwpct.risk_allocator import RiskAllocator
-from piwpct.utils.logging_utils import TrajectoryLogger, get_git_commit_hash, setup_logger
+from piwpct.utils.logging_utils import EpochMetricsLogger, TrajectoryLogger, get_git_commit_hash, setup_logger
+from piwpct.utils.run_directory import (
+    create_run_directory,
+    manifest_identifier,
+    update_run_metadata,
+)
 from piwpct.utils.split_integrity import SplitAuditor, SplitIntegrityViolation
 
 
@@ -202,7 +207,7 @@ def evaluate_epoch(
     return {"val_loss": total_loss / max(n_batches, 1)}, logits_arr, labels_arr
 
 
-def train_pipeline(
+def _train_pipeline_in_run(
     regime: str,
     backbone_name: str,
     config: Dict[str, Any],
@@ -210,11 +215,17 @@ def train_pipeline(
     target_wp: float = 0.70,
     seed: int = 42,
     device_str: Optional[str] = None,
-    output_dir: str = "outputs",
+    *,
+    output_dir: str,
+    run_id: str,
 ) -> Dict[str, Any]:
     """Execute end-to-end training pipeline for a given regime and backbone."""
-    logger = setup_logger(f"train.{regime}.{backbone_name}")
-    logger.info(f"Starting run: regime={regime}, backbone={backbone_name}, wp={target_wp}, seed={seed}")
+    run_dir = output_dir
+    logger = setup_logger(
+        f"train.{regime}.{backbone_name}",
+        log_file=os.path.join(run_dir, "logs", "application.log"),
+    )
+    logger.info(f"Starting run: run_id={run_id}, regime={regime}, backbone={backbone_name}, wp={target_wp}, seed={seed}")
 
     train_dataset = dataloaders["train"].dataset
     target_mode = getattr(train_dataset, "target_mode", "flavour_tagging")
@@ -226,11 +237,8 @@ def train_pipeline(
         )
 
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
-    run_dir = os.path.join(output_dir, f"{regime}_{backbone_name}_wp{int(target_wp*100)}_seed{seed}")
-    os.makedirs(run_dir, exist_ok=True)
-
-    trajectory_path = os.path.join(run_dir, "trajectories.jsonl")
-    trajectory_logger = TrajectoryLogger(trajectory_path)
+    trajectory_path = os.path.join(run_dir, "trajectories", "trajectories.jsonl")
+    trajectory_logger = TrajectoryLogger(trajectory_path, run_id=run_id)
 
     # Instantiate backbone
     backbone_cfg = dict(config.get("backbone", {}))
@@ -253,11 +261,18 @@ def train_pipeline(
         X_va = val_ds.data["high_level"]
         y_va = val_ds.data["labels"]
         model.fit_from_arrays(X_tr, y_tr, X_va, y_va)
+        checkpoint_path = os.path.join(run_dir, "checkpoints", "gbt_model.pkl")
+        temporary_checkpoint = checkpoint_path + ".tmp"
+        model.save_model(temporary_checkpoint)
+        os.replace(temporary_checkpoint, checkpoint_path)
         return {
             "model": model,
             "regime": regime,
             "backbone": backbone_name,
             "run_dir": run_dir,
+            "run_id": run_id,
+            "checkpoint_path": checkpoint_path,
+            "epoch_metrics_path": None,
             "target_wp": target_wp,
             "seed": seed,
             "trajectories": {},
@@ -317,7 +332,11 @@ def train_pipeline(
         )
 
     best_val_loss = float("inf")
+    best_epoch = 0
     best_weights = copy.deepcopy(model.state_dict())
+    epoch_metrics_logger = EpochMetricsLogger(
+        os.path.join(run_dir, "metrics", "epochs.jsonl"), run_id=run_id
+    )
 
     # Training loop
     for epoch in range(1, epochs + 1):
@@ -333,6 +352,7 @@ def train_pipeline(
             f"Epoch {epoch}/{epochs} ({elapsed:.1f}s) - "
             f"Train Loss: {train_metrics['train_loss']:.4f} - Val Loss: {val_metrics['val_loss']:.4f}"
         )
+        epoch_metrics_logger.log_epoch(epoch, train_metrics, val_metrics)
 
         # Periodic risk refresh hook for PI-WPCT at K-epoch boundaries
         if regime == "pi_wpct" and risk_allocator is not None and (epoch % refresh_interval_k == 0):
@@ -362,6 +382,7 @@ def train_pipeline(
 
         if val_metrics["val_loss"] < best_val_loss:
             best_val_loss = val_metrics["val_loss"]
+            best_epoch = epoch
             best_weights = copy.deepcopy(model.state_dict())
 
     model.load_state_dict(best_weights)
@@ -376,7 +397,9 @@ def train_pipeline(
         logger.info(f"Optimal temperature parameter: T={fitted_t:.4f}")
 
     # Save checkpoint with rich metadata
-    checkpoint_path = os.path.join(run_dir, "checkpoint.pt")
+    checkpoint_path = os.path.join(run_dir, "checkpoints", "checkpoint.pt")
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    temporary_checkpoint = checkpoint_path + ".tmp"
     manifest_hash = "unknown"
     dataset_auditor = getattr(train_dataset, "auditor", None)
     if dataset_auditor and dataset_auditor.manifest_path:
@@ -392,6 +415,9 @@ def train_pipeline(
             "target_wp": target_wp,
             "seed": seed,
             "epochs": epochs,
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
+            "run_id": run_id,
             "git_commit": get_git_commit_hash(),
             "manifest_hash": manifest_hash,
             "target_mode": target_mode,
@@ -400,8 +426,9 @@ def train_pipeline(
             "trajectories": trajectory_logger.get_trajectories(),
             "temperature": float(temp_scaler.temperature.item()) if temp_scaler else 1.0,
         },
-        checkpoint_path,
+        temporary_checkpoint,
     )
+    os.replace(temporary_checkpoint, checkpoint_path)
     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     return {
@@ -409,9 +436,96 @@ def train_pipeline(
         "regime": regime,
         "backbone": backbone_name,
         "run_dir": run_dir,
+        "run_id": run_id,
         "target_wp": target_wp,
         "seed": seed,
         "trajectories": trajectory_logger.get_trajectories(),
         "temperature_scaler": temp_scaler,
         "checkpoint_path": checkpoint_path,
+        "epoch_metrics_path": os.path.join(run_dir, "metrics", "epochs.jsonl"),
+        "best_epoch": best_epoch,
+        "best_val_loss": best_val_loss,
     }
+
+
+def train_pipeline(
+    regime: str,
+    backbone_name: str,
+    config: Dict[str, Any],
+    dataloaders: Dict[str, DataLoader],
+    target_wp: float = 0.70,
+    seed: int = 42,
+    device_str: Optional[str] = None,
+    output_dir: str = "outputs",
+    run_id: Optional[str] = None,
+    run_parent_dir: Optional[str] = None,
+    run_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Reserve a unique run directory, then execute the unchanged training pipeline."""
+    train_dataset = dataloaders["train"].dataset
+    target_mode = getattr(train_dataset, "target_mode", "flavour_tagging")
+    dataset_auditor = getattr(train_dataset, "auditor", None)
+    manifest_path = getattr(train_dataset, "manifest_path", None)
+    if manifest_path is None and dataset_auditor is not None:
+        manifest_path = getattr(dataset_auditor, "manifest_path", None)
+    dataset_mode = "real" if hasattr(train_dataset, "manifest_path") else "pilot" if dataset_auditor else "unknown"
+    identity: Dict[str, Any] = {
+        "run_type": "training",
+        "regime": regime,
+        "backbone": backbone_name,
+        "target_wp": float(target_wp),
+        "seed": int(seed),
+        "dataset_mode": dataset_mode,
+        "target_mode": target_mode,
+        "effective_config": config,
+        "effective_training_config": {
+            "regime": regime,
+            "backbone": backbone_name,
+            "target_wp": float(target_wp),
+            "seed": int(seed),
+            "epochs": int(config.get("experiment", {}).get("epochs", 10)),
+        },
+        **manifest_identifier(str(manifest_path) if manifest_path else None),
+    }
+    if run_metadata:
+        identity.update(run_metadata)
+    run_dir, selected_run_id = create_run_directory(
+        output_dir,
+        identity=identity,
+        run_id=run_id,
+        run_parent_dir=run_parent_dir,
+    )
+    try:
+        result = _train_pipeline_in_run(
+            regime=regime,
+            backbone_name=backbone_name,
+            config=config,
+            dataloaders=dataloaders,
+            target_wp=target_wp,
+            seed=seed,
+            device_str=device_str,
+            output_dir=str(run_dir),
+            run_id=selected_run_id,
+        )
+    except BaseException as exc:
+        update_run_metadata(
+            str(run_dir),
+            status="failed",
+            failure={"type": type(exc).__name__, "message": str(exc)},
+        )
+        raise
+    update_run_metadata(
+        str(run_dir),
+        status="training_complete",
+        checkpoint_path=result.get("checkpoint_path"),
+        trajectories_path=str(run_dir / "trajectories" / "trajectories.jsonl"),
+        best_epoch=result.get("best_epoch"),
+        best_val_loss=result.get("best_val_loss"),
+        paths={
+            "checkpoint": result.get("checkpoint_path"),
+            "epoch_metrics": result.get("epoch_metrics_path"),
+        },
+    )
+    result["run_dir"] = str(run_dir)
+    result["run_id"] = selected_run_id
+    return result

@@ -12,6 +12,7 @@ Usage:
 import argparse
 import os
 import sys
+from pathlib import Path
 import yaml
 import numpy as np
 import torch
@@ -25,10 +26,16 @@ from piwpct.cli_data import (
     ensure_split_manifest,
 )
 from piwpct.data import get_dataloaders
-from piwpct.data_paths import load_data_config, resolve_data_root
+from piwpct.data_paths import PROJECT_ROOT, load_data_config, resolve_data_root, resolve_project_path
 from piwpct.evaluation.report import EvaluationReporter
 from piwpct.metrics import compute_classification_metrics, compute_ece, compute_working_point_metrics, paired_bootstrap_comparison
 from piwpct.train import scale_calibration_and_test_logits, train_pipeline
+from piwpct.utils.run_directory import (
+    create_run_directory,
+    manifest_identifier,
+    update_run_metadata,
+    write_run_json,
+)
 from piwpct.utils.seeding import seed_everything
 
 
@@ -43,6 +50,7 @@ def main():
     parser.add_argument("--split-manifest", type=str, default=None)
     parser.add_argument("--prepared-data-root", type=str, default=None)
     parser.add_argument("--output-root", "--output-dir", dest="output_root", default=None)
+    parser.add_argument("--run-id", default=None, help="Optional explicit ablation-suite ID; collisions are refused")
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--pin-memory", action="store_true")
     parser.add_argument("--particle-cap", type=int, default=None)
@@ -55,16 +63,16 @@ def main():
     if args.data_mode == "real" and args.target_mode is None:
         parser.error("--real-data requires an explicit --target-mode matching the prepared manifest.")
 
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    base_dir = str(PROJECT_ROOT)
     data_cfg = load_data_config(os.path.join(base_dir, "configs", "data.yaml"))
     with open(os.path.join(base_dir, "configs", "backbones", f"{args.backbone}.yaml")) as f:
         bb_cfg = yaml.safe_load(f)
 
     prepared_root, _ = resolve_data_root("prepared_data_root", args.prepared_data_root, data_cfg)
     output_root, _ = resolve_data_root("output_root", args.output_root, data_cfg)
-    manifest_path = args.split_manifest or (
+    manifest_path = str(resolve_project_path(args.split_manifest)) if args.split_manifest else (
         str(prepared_root / "canonical_split_manifest.json")
-        if args.data_mode == "real" else "data/splits/canonical_split_manifest.json"
+        if args.data_mode == "real" else str(resolve_project_path("data/splits/canonical_split_manifest.json"))
     )
     try:
         manifest = ensure_split_manifest(
@@ -98,6 +106,28 @@ def main():
         allow_incomplete=args.allow_incomplete_data,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    suite_dir, suite_id = create_run_directory(
+        str(output_root),
+        run_id=args.run_id,
+        identity={
+            "run_type": "ablation_suite",
+            "dataset_mode": args.data_mode,
+            "dataset_identifier": manifest.get("dataset_name", Path(manifest_path).stem),
+            "target_mode": target_mode,
+            "backbone": args.backbone,
+            "requested_regimes": list(args.regimes),
+            "requested_working_points": list(args.wps),
+            "requested_seeds": list(args.seeds),
+            "effective_run_selection": {
+                "regimes": list(args.regimes),
+                "working_point": args.wps[0],
+                "seed": args.seeds[0],
+            },
+            "effective_config": {"epochs": args.epochs, "data": data_cfg, "backbone": bb_cfg},
+            **manifest_identifier(manifest_path),
+        },
+    )
+    child_run_directories = []
 
     def _get_logits(model, loader):
         model.eval()
@@ -142,7 +172,15 @@ def main():
             target_wp=wp,
             seed=seed,
             output_dir=str(output_root),
+            run_parent_dir=str(suite_dir / "runs"),
+            run_metadata={
+                "run_type": "ablation_child",
+                "dataset_mode": args.data_mode,
+                "dataset_identifier": manifest.get("dataset_name", Path(manifest_path).stem),
+                "target_mode": target_mode,
+            },
         )
+        child_run_directories.append(train_res["run_dir"])
 
         model = train_res["model"]
 
@@ -176,6 +214,44 @@ def main():
             "mean_set_size": conf_m.mean_set_size,
             "ece": ece_val,
         }
+        child_metrics_path = write_run_json(
+            train_res["run_dir"],
+            "metrics/final_metrics.json",
+            {
+                "schema": "piwpct.final_metrics.v1",
+                "run_id": train_res["run_id"],
+                "dataset_identifier": manifest.get("dataset_name", Path(manifest_path).stem),
+                "dataset_mode": args.data_mode,
+                "target_mode": target_mode,
+                "regime": reg,
+                "backbone": args.backbone,
+                "target_wp": wp,
+                "seed": seed,
+                "metrics": regime_results[reg],
+            },
+        )
+        calibration_path = write_run_json(
+            train_res["run_dir"],
+            "metrics/conformal_calibration.json",
+            {
+                "schema": "piwpct.conformal_calibration.v1",
+                "run_id": train_res["run_id"],
+                "method": "mondrian",
+                "score_type": calibrator.score_type,
+                "alpha": calibrator.alpha,
+                "class_quantiles": {str(key): float(value) for key, value in calibrator.class_quantiles.items()},
+                "calibration_count_by_class": {
+                    str(index): int(np.sum(cal_labels == index)) for index in range(len(class_names))
+                },
+                "temperature": temperature,
+            },
+        )
+        update_run_metadata(
+            train_res["run_dir"],
+            status="completed",
+            final_metrics_path=str(child_metrics_path),
+            conformal_calibration_path=str(calibration_path),
+        )
 
     # Paired Bootstrap Comparison between WPCT and PI-WPCT
     paired_comparisons = None
@@ -195,7 +271,7 @@ def main():
         )
 
     # Generate final report with automated failure-mode / null-result checks
-    reporter = EvaluationReporter(output_dir=os.path.join(str(output_root), "reports"))
+    reporter = EvaluationReporter(output_dir=str(suite_dir / "reports"))
     report_file = reporter.generate_markdown_report(
         experiment_name=f"Ablation Matrix ({args.backbone}, WP={args.wps[0]})",
         regime_results=regime_results,
@@ -204,6 +280,14 @@ def main():
     )
     print("\n[+] Full ablation matrix finished successfully!")
     print(f"[+] Final report generated at: {report_file}")
+    report_json = str(Path(report_file).with_suffix(".json"))
+    update_run_metadata(
+        str(suite_dir),
+        status="completed",
+        child_run_directories=child_run_directories,
+        report_markdown=report_file,
+        report_json=report_json,
+    )
 
 
 if __name__ == "__main__":
